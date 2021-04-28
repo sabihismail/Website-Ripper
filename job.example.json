@@ -1,0 +1,19 @@
+{
+  "content_name": {
+    "id": "",
+    "prefix": ""
+  },
+  "cookies": [
+    {
+      "name": "",
+      "value": "",
+      "domain": "",
+      "path": ""
+    }
+  ],
+  "out_dir": "/path/to/downloads",
+  "scrape_type": "SINGLE_PAGE",
+  "urls": [
+    "https://fake-website.com/"
+  ]
+}
