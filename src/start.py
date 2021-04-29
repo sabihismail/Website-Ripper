@@ -6,7 +6,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
 
 from src.config import Config, ScrapeType, ContentName, Cookie
-from src.util import error, get_file_extension, formulate_path, download_file, get_valid_filename, get_referer, \
+from src.util import error, get_file_extension, validate_path, download_file, get_valid_filename, get_referer, \
     get_origin
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
@@ -90,12 +90,11 @@ def start_driver(driver: WebDriver, config: Config, url: str):
     title = ''
     if config.scrape_type == ScrapeType.SINGLE_PAGE:
         title = get_content_title(driver, content_name=config.content_name)
-    title = get_valid_filename(title)
 
     videos = driver.find_elements_by_tag_name('video')
 
     for i in range(len(videos)):
-        print(f'Starting video download: {i + 1}/{len(videos)}.')
+        print(f'Starting video download {i + 1}/{len(videos)}.')
 
         source = videos[i].find_element_by_tag_name('source')
         src_url = source.get_attribute('src')
@@ -103,7 +102,8 @@ def start_driver(driver: WebDriver, config: Config, url: str):
         ext = get_file_extension(src_url)
         filename = title + (f' - {i + 1}' if len(videos) > 1 else '') + '.' + ext
 
-        full_path = formulate_path(config.out_dir, filename)
+        full_path = validate_path(config.out_dir)
+        full_path = get_valid_filename(full_path, filename)
 
         headers = [
             ('Referer', get_referer(driver.current_url)),
