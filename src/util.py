@@ -1,14 +1,16 @@
 import os
 import urllib.request
+from http.client import HTTPMessage
 from typing import List, Tuple
 
 from src.progress_bar import ProgressBarImpl
 
-INVALID_FILENAME_CHARACTERS = [
-    '\"', '<', '>', '|', '\0', chr(1), chr(2), chr(3), chr(4), chr(5), chr(6), chr(7), chr(8), chr(9), chr(10), chr(12),
-    chr(13), chr(14), chr(15), chr(16), chr(17), chr(18), chr(19), chr(20), chr(21), chr(22), chr(23), chr(24), chr(25),
-    chr(26), chr(27), chr(28), chr(29), chr(30), chr(31), ':', '*', '?', '\\', '/'
-]
+# Retrieved from https://referencesource.microsoft.com/#mscorlib/system/io/path.cs,090eca8621a248ee
+INVALID_PATH_CHARACTERS = ['\"', '<', '>', '|', '\0', '*', '?'] + \
+                          [chr(i) for i in range(1, 32)]
+
+INVALID_FILENAME_CHARACTERS = ['\"', '<', '>', '|', '\0', ':', '*', '?', '\\', '/'] + \
+                              [chr(i) for i in range(1, 32)]
 
 
 def error(s) -> None:
@@ -70,19 +72,26 @@ def get_origin(s: str):
     return s[0:find_nth(s, '/', 3)]
 
 
+def combine_path(directory: str, new_dir: str) -> str:
+    return os.path.join(directory, new_dir)
+
+
 def validate_path(directory: str) -> str:
     if directory.isspace():
         directory = os.path.join(os.getcwd(), '/out')
 
     path = directory.replace('\\', '/')
 
+    if not os.path.exists(path):
+        os.mkdir(path)
+
     return path
 
 
-def download_file(url, filename: str = None, headers: List[Tuple[str, str]] = None):
+def download_file(url, filename: str = None, headers: List[Tuple[str, str]] = None) -> Tuple[str, HTTPMessage]:
     if headers:
         opener = urllib.request.build_opener()
         opener.addheaders = headers
         urllib.request.install_opener(opener)
 
-    urllib.request.urlretrieve(url, filename=filename, reporthook=ProgressBarImpl())
+    return urllib.request.urlretrieve(url, filename=filename, reporthook=ProgressBarImpl())
