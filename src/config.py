@@ -1,8 +1,9 @@
 import json
-from collections import namedtuple
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import Optional, TypeVar
+
+from selenium.webdriver.common.by import By
 
 from src.util import *
 
@@ -18,11 +19,11 @@ CONFIG_VAL_CONTENT_NAME_ID = 'id'
 CONFIG_VAL_CONTENT_NAME_PREFIX = 'prefix'
 
 CONFIG_VAL_LOGIN = 'login'
-CONFIG_VAL_LOGIN_USER = 'user'
-CONFIG_VAL_LOGIN_PASSWORD = 'password'
-CONFIG_VAL_LOGIN_USER_ID = 'user_id'
-CONFIG_VAL_LOGIN_PASSWORD_ID = 'password_id'
-CONFIG_VAL_LOGIN_SUBMIT_ID = 'submit_id'
+CONFIG_VAL_LOGIN_ELEMENT_ID = 'id'
+CONFIG_VAL_LOGIN_ELEMENT_TYPE = 'type'
+CONFIG_VAL_LOGIN_ELEMENT_VALUE = 'value'
+CONFIG_VAL_LOGIN_ELEMENT_TASK = 'task'
+CONFIG_VAL_LOGIN_CHILDREN = 'children'
 CONFIG_VAL_LOGIN_URL = 'url'
 
 
@@ -30,19 +31,30 @@ class ScrapeType(Enum):
     SINGLE_PAGE = 0
     ALL_PAGES = 1
 
-    @staticmethod
-    def keys():
-        return [e.name for e in ScrapeType]
+
+class UITask(Enum):
+    GO_TO = 0
+    CLICK = 1
+
+
+class UIElement:
+    def __init__(self, identifier: str, ui_type: By, value: str = None, task: UITask = None):
+        self.identifier = identifier
+        self.ui_type = ui_type
+        self.value = value
+        self.task = task
+
+    def __repr__(self):
+        return str(self.__dict__)
 
 
 class Login:
-    def __init__(self, user: str, password: str, user_id: str, password_id: str, submit_id: str, url: str):
-        self.user = user
-        self.password = password
-        self.user_id = user_id
-        self.password_id = password_id
-        self.submit_id = submit_id
+    def __init__(self, url: str, children: List[UIElement]):
         self.url = url
+        self.children = children
+
+    def __repr__(self):
+        return str(self.__dict__)
 
 
 class Cookie:
@@ -55,6 +67,9 @@ class Cookie:
         if dictionary:
             for key in dictionary:
                 setattr(self, key, dictionary[key])
+
+        if not self.name or not self.value or not self.domain or not self.path:
+            error(f'Invalid Cookie')
 
     def __repr__(self):
         return str(self.__dict__)
@@ -112,31 +127,48 @@ def get_content_name(obj) -> ContentName:
     return content_name
 
 
+def json_get_enum(obj, json_val, class_type, fatal=False):
+    val = json_get(obj, json_val, default=None, fatal=fatal)
+
+    if not val:
+        return None
+
+    val = str(val).upper()
+    if val not in class_type.__dict__.keys():
+        error(f'Invalid Enum: {val}, Keys: {class_type.__dict__.keys()}')
+
+    return class_type.__dict__[val]
+
+
+def get_ui_element(obj):
+    identifier = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_ID, fatal=True)
+    value = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_VALUE, default=None)
+    task = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TASK, UITask)
+    ui_type = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TYPE, By)
+
+    return UIElement(identifier, ui_type, value=value, task=task)
+
+
 def get_login(obj) -> Login:
     login = None
     login_obj = json_get(obj, CONFIG_VAL_LOGIN)
     if login_obj:
-        user = json_get(login_obj, CONFIG_VAL_LOGIN_USER, fatal=True)
-        password = json_get(login_obj, CONFIG_VAL_LOGIN_PASSWORD, fatal=True)
-        user_id = json_get(login_obj, CONFIG_VAL_LOGIN_USER_ID, fatal=True)
-        password_id = json_get(login_obj, CONFIG_VAL_LOGIN_PASSWORD_ID, fatal=True)
-        submit_id = json_get(login_obj, CONFIG_VAL_LOGIN_SUBMIT_ID, fatal=True)
         url = json_get(login_obj, CONFIG_VAL_LOGIN_URL, fatal=True)
 
-        login = Login(user, password, user_id, password_id, submit_id, url)
+        children = []
+        children_obj = json_get(login_obj, CONFIG_VAL_LOGIN_CHILDREN, fatal=True)
+        for child_obj in children_obj:
+            child = get_ui_element(child_obj)
+
+            children.append(child)
+
+        login = Login(url, children)
 
     return login
 
 
 def json_to_config(obj) -> Config:
-    json_get(obj, CONFIG_VAL_SCRAPE_TYPE, fatal=True)
-
-    scrape_type_val = obj[CONFIG_VAL_SCRAPE_TYPE]
-    if scrape_type_val not in ScrapeType.keys():
-        error(f'Invalid ScrapeType: {scrape_type_val}')
-
-    scrape_type = ScrapeType[scrape_type_val]
-
+    scrape_type = json_get_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
     urls = json_get(obj, CONFIG_VAL_URLS, default=List[str])
     out_dir = json_get(obj, CONFIG_VAL_OUT_DIR, default=None)
     user_agent = json_get(obj, CONFIG_VAL_USER_AGENT, default=None)

@@ -88,10 +88,15 @@ def validate_path(directory: str) -> str:
     return path
 
 
-def download_file(url, filename: str = None, headers: List[Tuple[str, str]] = None) -> Tuple[str, HTTPMessage]:
-    if headers:
-        opener = urllib.request.build_opener()
-        opener.addheaders = headers
-        urllib.request.install_opener(opener)
+def download_file(url, filename: str = None, headers: List[Tuple[str, str]] = None, user_agent: str = None) \
+        -> Tuple[str, HTTPMessage]:
+    opener = urllib.request.build_opener()
 
+    if user_agent:
+        headers.append(('User-Agent', user_agent))
+
+    if headers:
+        opener.addheaders = headers
+
+    urllib.request.install_opener(opener)
     return urllib.request.urlretrieve(url, filename=filename, reporthook=ProgressBarImpl())

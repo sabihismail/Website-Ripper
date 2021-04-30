@@ -1,13 +1,21 @@
+import mimetypes
+import os
+import re
 from http.client import HTTPMessage
+from pathlib import Path
 from time import sleep
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from urllib.parse import urlparse
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.wait import WebDriverWait
 
-from src.config import Config, ScrapeType, ContentName, Cookie
+from src.config import Config, ScrapeType, ContentName, Cookie, UIElement, UITask
 from src.util import error, get_file_extension, validate_path, download_file, get_valid_filename, get_referer, \
     get_origin, combine_path
 
@@ -28,17 +36,22 @@ def wait_page_load(driver: WebDriver):
         sleep(1)
 
 
-def driver_go_and_wait(driver: WebDriver, url: str):
+def is_url_exact(u1: str, u2: str):
+    smallest = u1 if min(len(u1), len(u2)) == len(u1) else u2
+    largest = u2 if u1 == smallest else u1
+
+    return smallest + '/' == largest
+
+
+def driver_go_and_wait(driver: WebDriver, url: str, fail: int = 0):
+    if fail >= 5:
+        error(f'URL does not ever match, {url} never becomes {driver.current_url}')
+
     driver.get(url)
     wait_page_load(driver)
 
-    fail = 0
-    while driver.current_url != url:
-        driver_go_and_wait(driver, url)
-        fail += 1
-
-        if fail >= 5:
-            error(f'URL doesn\'t ever become requested URL')
+    if not is_url_exact(driver.current_url, url):
+        driver_go_and_wait(driver, url, fail + 1)
 
 
 def get_mapped_cookies(cookies: List[Cookie]):
@@ -52,34 +65,22 @@ def get_mapped_cookies(cookies: List[Cookie]):
     return mapping
 
 
-def get_by_any_type(driver: WebDriver, identifier: str, fatal: bool = False) -> List[WebElement]:
-    element = driver.find_elements_by_id(identifier)
-    if element:
-        return element
+def get_ui_element(driver: WebDriver, element: UIElement, timeout=30, fatal=True) -> Optional[WebElement]:
+    specifier = (element.ui_type, element.identifier)
 
-    element = driver.find_elements_by_class_name(identifier)
-    if element:
-        return element
+    try:
+        wait = WebDriverWait(driver, timeout)
+        found_element = wait.until(expected_conditions.visibility_of_element_located(specifier))
 
-    element = driver.find_elements_by_tag_name(identifier)
-    if element:
-        return element
-
-    element = driver.find_elements_by_xpath(identifier)
-    if element:
-        return element
-
-    element = driver.find_elements_by_name(identifier)
-    if element:
-        return element
-
-    if fatal:
-        error(f'Cannot find element {identifier}')
-
-    return []
+        return found_element
+    except TimeoutException:
+        if fatal:
+            exit(f'Could not find {element}')
+        else:
+            return None
 
 
-def start(config: Config):
+def scrape(config: Config):
     options = Options()
     options.headless = False
 
@@ -104,11 +105,17 @@ def start(config: Config):
         print('Configuring login credentials in Selenium.')
 
         driver.get(config.login.url)
-        wait_page_load(driver)
+        for child in config.login.children:
+            element = get_ui_element(driver, child, fatal=True)
 
-        user_input = get_by_any_type(driver, config.login.user_id, fatal=True)[0]
-        password_input = get_by_any_type(driver, config.login.password_id, fatal=True)[0]
-        submit_button = get_by_any_type(driver, config.login.submit_id, fatal=True)[0]
+            if child.value:
+                element.send_keys(child.value)
+
+            if child.task:
+                if child.task == UITask.GO_TO:
+                    driver.switch_to.frame(element)
+                elif child.task == UITask.CLICK:
+                    element.click()
 
     if config.scrape_type == ScrapeType.SINGLE_PAGE:
         scrape_single_page(driver, config)
@@ -142,19 +149,40 @@ def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
 
 
 def download_element(driver: WebDriver, src_url: str, out_dir: str = None, title: str = None, current_index: int = -1,
-                     length: int = -1) -> Tuple[str, HTTPMessage]:
-    ext = get_file_extension(src_url)
-    filename = title + (f' - {current_index + 1}' if length > 1 else '') + '.' + ext
+                     length: int = -1, user_agent: str = None) -> str:
+    full_path = None
+    if title:
+        ext = get_file_extension(src_url)
+        filename = title + (f' - {current_index + 1}' if length > 1 else '') + '.' + ext
 
-    full_path = validate_path(out_dir)
-    full_path = get_valid_filename(full_path, filename)
+        full_path = validate_path(out_dir)
+        full_path = get_valid_filename(full_path, filename)
 
     headers = [
         ('Referer', get_referer(driver.current_url)),
         ('Origin', get_origin(driver.current_url)),
     ]
 
-    return download_file(src_url, full_path, headers=headers)
+    filename, headers = download_file(src_url, full_path, headers=headers, user_agent=user_agent)
+
+    actual_name = None
+    content_disposition = headers.get('Content-Disposition', failobj=None)
+    if content_disposition:
+        actual_name = re.findall('filename=(.+)', content_disposition)[0]
+
+    content_type = headers.get('Content-Type', failobj=None)
+    if not content_disposition and content_type:
+        ext = mimetypes.guess_extension(content_type)
+
+        actual_name = f'{filename}.{ext}'
+
+    if actual_name:
+        real_path = Path(filename)
+        out_path = combine_path(str(real_path.parent), actual_name)
+
+        filename = str(real_path.rename(out_path)).replace('\\', '/')
+
+    return filename
 
 
 def get_relative_path(file: str, directory: str):
@@ -182,8 +210,8 @@ def scrape_page(driver: WebDriver, config: Config, url: str, out_dir: str):
         source = videos[i].find_element_by_tag_name('source')
         src_url = source.get_attribute('src')
 
-        filename, _ = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i,
-                                       length=len(videos))
+        filename = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i, length=len(videos),
+                                    user_agent=config.user_agent)
 
         downloaded_elements.append((src_url, filename))
 
@@ -193,8 +221,8 @@ def scrape_page(driver: WebDriver, config: Config, url: str, out_dir: str):
 
         src_url = images[i].get_attribute('src')
 
-        filename, _ = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i,
-                                       length=len(images))
+        filename = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i, length=len(images),
+                                    user_agent=config.user_agent)
 
         downloaded_elements.append((src_url, filename))
 

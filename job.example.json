@@ -12,12 +12,10 @@
     }
   ],
   "login": {
-    "user": "",
-    "password": "",
-    "user_id": "",
-    "pass_id": "",
-    "submit_id": "",
-    "url": ""
+    "children": [
+
+    ],
+    "url": "https://fake-website.com/login"
   },
   "out_dir": "/path/to/downloads",
   "scrape_type": "SINGLE_PAGE",
