@@ -1,7 +1,6 @@
 import json
-from enum import Enum
+from enum import Enum, Flag, auto
 from pathlib import Path
-from typing import Optional, TypeVar
 
 from selenium.webdriver.common.by import By
 
@@ -11,6 +10,7 @@ CONFIG_FILE = 'job.json'
 CONFIG_VAL_COOKIES = 'cookies'
 CONFIG_VAL_OUT_DIR = 'out_dir'
 CONFIG_VAL_SCRAPE_TYPE = 'scrape_type'
+CONFIG_VAL_SCRAPE_ELEMENTS = 'scrape_elements'
 CONFIG_VAL_URLS = 'urls'
 CONFIG_VAL_USER_AGENT = 'user_agent'
 
@@ -25,6 +25,13 @@ CONFIG_VAL_LOGIN_ELEMENT_VALUE = 'value'
 CONFIG_VAL_LOGIN_ELEMENT_TASK = 'task'
 CONFIG_VAL_LOGIN_CHILDREN = 'children'
 CONFIG_VAL_LOGIN_URL = 'url'
+
+
+class ScrapeElements(Flag):
+    VIDEOS = auto()
+    IMAGES = auto()
+    HTML = auto()
+    ALL = VIDEOS | IMAGES | HTML
 
 
 class ScrapeType(Enum):
@@ -92,7 +99,7 @@ class Config:
     """
     def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None,
                  cookies: List[Cookie] = None, content_name: ContentName = None, user_agent: str = None,
-                 login: Login = None):
+                 login: Login = None, scrape_elements: ScrapeElements = None):
         self.scrape_type = scrape_type
         self.urls: List[str] = [] if urls is None else urls
         self.out_dir = out_dir
@@ -100,6 +107,7 @@ class Config:
         self.content_name = content_name
         self.user_agent = user_agent
         self.login = login
+        self.scrape_elements = scrape_elements
 
     def __repr__(self):
         return str(self.__dict__)
@@ -143,8 +151,8 @@ def json_get_enum(obj, json_val, class_type, fatal=False):
 def get_ui_element(obj):
     identifier = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_ID, fatal=True)
     value = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_VALUE, default=None)
-    task = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TASK, UITask)
-    ui_type = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TYPE, By)
+    task: UITask = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TASK, UITask)
+    ui_type: By = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TYPE, By)
 
     return UIElement(identifier, ui_type, value=value, task=task)
 
@@ -168,7 +176,8 @@ def get_login(obj) -> Login:
 
 
 def json_to_config(obj) -> Config:
-    scrape_type = json_get_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
+    scrape_type: ScrapeType = json_get_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
+    scrape_elements: ScrapeElements = json_get_enum(obj, CONFIG_VAL_SCRAPE_ELEMENTS, ScrapeElements, fatal=True)
     urls = json_get(obj, CONFIG_VAL_URLS, default=List[str])
     out_dir = json_get(obj, CONFIG_VAL_OUT_DIR, default=None)
     user_agent = json_get(obj, CONFIG_VAL_USER_AGENT, default=None)
@@ -178,8 +187,8 @@ def json_to_config(obj) -> Config:
     cookies_obj = json_get(obj, CONFIG_VAL_COOKIES, default={})
     cookies = [Cookie(dictionary=cookie) for cookie in cookies_obj]
 
-    config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name,
-                    user_agent=user_agent, login=login)
+    config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name, user_agent=user_agent, login=login,
+                    scrape_elements=scrape_elements)
 
     return config
 
