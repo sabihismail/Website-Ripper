@@ -19,6 +19,7 @@
   },
   "out_dir": "/path/to/downloads",
   "scrape_elements": "ALL",
+  "scrape_sitemap": true,
   "scrape_type": "SINGLE_PAGE",
   "urls": [
     "https://fake-website.com/"

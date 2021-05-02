@@ -1,16 +1,16 @@
 import json
-from enum import Enum, Flag, auto
-from pathlib import Path
+from enum import Flag, auto
 
 from selenium.webdriver.common.by import By
 
-from src.util import *
+from src.util.web import *
 
 CONFIG_FILE = 'job.json'
 CONFIG_VAL_COOKIES = 'cookies'
 CONFIG_VAL_OUT_DIR = 'out_dir'
 CONFIG_VAL_SCRAPE_TYPE = 'scrape_type'
 CONFIG_VAL_SCRAPE_ELEMENTS = 'scrape_elements'
+CONFIG_VAL_SCRAPE_SITEMAP = 'scrape_sitemap'
 CONFIG_VAL_URLS = 'urls'
 CONFIG_VAL_USER_AGENT = 'user_agent'
 
@@ -99,7 +99,7 @@ class Config:
     """
     def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None,
                  cookies: List[Cookie] = None, content_name: ContentName = None, user_agent: str = None,
-                 login: Login = None, scrape_elements: ScrapeElements = None):
+                 login: Login = None, scrape_elements: ScrapeElements = None, scrape_sitemap: bool = True):
         self.scrape_type = scrape_type
         self.urls: List[str] = [] if urls is None else urls
         self.out_dir = out_dir
@@ -108,6 +108,7 @@ class Config:
         self.user_agent = user_agent
         self.login = login
         self.scrape_elements = scrape_elements
+        self.scrape_sitemap = scrape_sitemap
 
     def __repr__(self):
         return str(self.__dict__)
@@ -178,6 +179,7 @@ def get_login(obj) -> Login:
 def json_to_config(obj) -> Config:
     scrape_type: ScrapeType = json_get_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
     scrape_elements: ScrapeElements = json_get_enum(obj, CONFIG_VAL_SCRAPE_ELEMENTS, ScrapeElements, fatal=True)
+    scrape_sitemap: bool = json_get(obj, CONFIG_VAL_SCRAPE_SITEMAP, default=True)
     urls = json_get(obj, CONFIG_VAL_URLS, default=List[str])
     out_dir = json_get(obj, CONFIG_VAL_OUT_DIR, default=None)
     user_agent = json_get(obj, CONFIG_VAL_USER_AGENT, default=None)
@@ -188,7 +190,7 @@ def json_to_config(obj) -> Config:
     cookies = [Cookie(dictionary=cookie) for cookie in cookies_obj]
 
     config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name, user_agent=user_agent, login=login,
-                    scrape_elements=scrape_elements)
+                    scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap)
 
     return config
 
