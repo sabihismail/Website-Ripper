@@ -1,12 +1,16 @@
 import json
-from enum import Flag, auto
+from enum import Flag, auto, Enum
+from pathlib import Path
+from typing import List
 
 from selenium.webdriver.common.by import By
 
-from src.util.web import *
+from src.util.generic import error
 
 CONFIG_FILE = 'job.json'
 CONFIG_VAL_COOKIES = 'cookies'
+CONFIG_VAL_DATA_DIRECTORY = 'data_directory'
+CONFIG_VAL_SUBSTRINGS_TO_SKIP = 'substrings_to_skip'
 CONFIG_VAL_OUT_DIR = 'out_dir'
 CONFIG_VAL_SCRAPE_TYPE = 'scrape_type'
 CONFIG_VAL_SCRAPE_ELEMENTS = 'scrape_elements'
@@ -97,9 +101,9 @@ class Config:
         SELECT json_group_array(cookie) FROM (SELECT json_object('name', name, 'value', value, 'host', host, 'path',
             path) as cookie FROM moz_cookies where host like '%host%')
     """
-    def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None,
-                 cookies: List[Cookie] = None, content_name: ContentName = None, user_agent: str = None,
-                 login: Login = None, scrape_elements: ScrapeElements = None, scrape_sitemap: bool = True):
+    def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None, cookies: List[Cookie] = None, content_name: ContentName = None,
+                 user_agent: str = None, login: Login = None, scrape_elements: ScrapeElements = None, scrape_sitemap: bool = True,
+                 data_directory: str = 'data', substrings_to_skip: List[str] = None):
         self.scrape_type = scrape_type
         self.urls: List[str] = [] if urls is None else urls
         self.out_dir = out_dir
@@ -109,12 +113,14 @@ class Config:
         self.login = login
         self.scrape_elements = scrape_elements
         self.scrape_sitemap = scrape_sitemap
+        self.data_directory = data_directory
+        self.substrings_to_skip = substrings_to_skip
 
     def __repr__(self):
         return str(self.__dict__)
 
 
-def json_get(json, key, default=None, fatal=False):
+def json_parse(json, key, default=None, fatal=False):
     if key in json:
         return json[key]
 
@@ -124,20 +130,20 @@ def json_get(json, key, default=None, fatal=False):
     return default
 
 
-def get_content_name(obj) -> ContentName:
+def parse_content_name(obj) -> ContentName:
     content_name = None
-    content_name_obj = json_get(obj, CONFIG_VAL_CONTENT_NAME)
+    content_name_obj = json_parse(obj, CONFIG_VAL_CONTENT_NAME)
     if content_name_obj:
-        identifier = json_get(content_name_obj, CONFIG_VAL_CONTENT_NAME_ID, fatal=True)
-        prefix = json_get(content_name_obj, CONFIG_VAL_CONTENT_NAME_PREFIX)
+        identifier = json_parse(content_name_obj, CONFIG_VAL_CONTENT_NAME_ID, fatal=True)
+        prefix = json_parse(content_name_obj, CONFIG_VAL_CONTENT_NAME_PREFIX)
 
         content_name = ContentName(identifier, prefix)
 
     return content_name
 
 
-def json_get_enum(obj, json_val, class_type, fatal=False):
-    val = json_get(obj, json_val, default=None, fatal=fatal)
+def json_parse_enum(obj, json_val, class_type, fatal=False):
+    val = json_parse(obj, json_val, default=None, fatal=fatal)
 
     if not val:
         return None
@@ -149,25 +155,25 @@ def json_get_enum(obj, json_val, class_type, fatal=False):
     return class_type.__dict__[val]
 
 
-def get_ui_element(obj):
-    identifier = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_ID, fatal=True)
-    value = json_get(obj, CONFIG_VAL_LOGIN_ELEMENT_VALUE, default=None)
-    task: UITask = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TASK, UITask)
-    ui_type: By = json_get_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TYPE, By)
+def parse_ui_element(obj):
+    identifier = json_parse(obj, CONFIG_VAL_LOGIN_ELEMENT_ID, fatal=True)
+    value = json_parse(obj, CONFIG_VAL_LOGIN_ELEMENT_VALUE, default=None)
+    task: UITask = json_parse_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TASK, UITask)
+    ui_type: By = json_parse_enum(obj, CONFIG_VAL_LOGIN_ELEMENT_TYPE, By)
 
     return UIElement(identifier, ui_type, value=value, task=task)
 
 
-def get_login(obj) -> Login:
+def parse_login(obj) -> Login:
     login = None
-    login_obj = json_get(obj, CONFIG_VAL_LOGIN)
+    login_obj = json_parse(obj, CONFIG_VAL_LOGIN)
     if login_obj:
-        url = json_get(login_obj, CONFIG_VAL_LOGIN_URL, fatal=True)
+        url = json_parse(login_obj, CONFIG_VAL_LOGIN_URL, fatal=True)
 
         children = []
-        children_obj = json_get(login_obj, CONFIG_VAL_LOGIN_CHILDREN, fatal=True)
+        children_obj = json_parse(login_obj, CONFIG_VAL_LOGIN_CHILDREN, fatal=True)
         for child_obj in children_obj:
-            child = get_ui_element(child_obj)
+            child = parse_ui_element(child_obj)
 
             children.append(child)
 
@@ -177,20 +183,22 @@ def get_login(obj) -> Login:
 
 
 def json_to_config(obj) -> Config:
-    scrape_type: ScrapeType = json_get_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
-    scrape_elements: ScrapeElements = json_get_enum(obj, CONFIG_VAL_SCRAPE_ELEMENTS, ScrapeElements, fatal=True)
-    scrape_sitemap: bool = json_get(obj, CONFIG_VAL_SCRAPE_SITEMAP, default=True)
-    urls = json_get(obj, CONFIG_VAL_URLS, default=List[str])
-    out_dir = json_get(obj, CONFIG_VAL_OUT_DIR, default=None)
-    user_agent = json_get(obj, CONFIG_VAL_USER_AGENT, default=None)
-    content_name = get_content_name(obj)
-    login = get_login(obj)
+    scrape_type: ScrapeType = json_parse_enum(obj, CONFIG_VAL_SCRAPE_TYPE, ScrapeType)
+    scrape_elements: ScrapeElements = json_parse_enum(obj, CONFIG_VAL_SCRAPE_ELEMENTS, ScrapeElements, fatal=True)
+    scrape_sitemap: bool = json_parse(obj, CONFIG_VAL_SCRAPE_SITEMAP, default=True)
+    urls = json_parse(obj, CONFIG_VAL_URLS, default=List[str])
+    out_dir = json_parse(obj, CONFIG_VAL_OUT_DIR, default=None)
+    user_agent = json_parse(obj, CONFIG_VAL_USER_AGENT, default=None)
+    data_directory: str = json_parse(obj, CONFIG_VAL_DATA_DIRECTORY, default='data')
+    substrings_to_skip: List[str] = json_parse(obj, CONFIG_VAL_SUBSTRINGS_TO_SKIP, default=None)
+    content_name = parse_content_name(obj)
+    login = parse_login(obj)
 
-    cookies_obj = json_get(obj, CONFIG_VAL_COOKIES, default={})
+    cookies_obj = json_parse(obj, CONFIG_VAL_COOKIES, default={})
     cookies = [Cookie(dictionary=cookie) for cookie in cookies_obj]
 
     config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name, user_agent=user_agent, login=login,
-                    scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap)
+                    scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap, data_directory=data_directory, substrings_to_skip=substrings_to_skip)
 
     return config
 
@@ -202,7 +210,6 @@ def get_config(file=CONFIG_FILE):
 
     with open(file, 'r') as file_obj:
         text = ''.join(file_obj.readlines())
-
         json_obj = json.loads(text)
 
         return json_to_config(json_obj)

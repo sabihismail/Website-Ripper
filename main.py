@@ -1,6 +1,7 @@
 import sys
-from src.config import *
-from src.scrape import *
+
+from src.config import CONFIG_FILE, get_config
+from src.scrape import scrape
 
 sys.argv = [
     __file__,

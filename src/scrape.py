@@ -1,7 +1,8 @@
-import re
 from time import sleep
 from typing import List, Tuple, Optional
+from urllib.parse import urlparse, ParseResult
 
+import filetype
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -11,10 +12,11 @@ from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.wait import WebDriverWait
 
 from src.config import Config, ScrapeType, ContentName, Cookie, UIElement, UITask, ScrapeElements
-from src.util.generic import name_of, distinct
+from src.util.generic import name_of, distinct, contains_substring
 from src.util.io import validate_path, write_file, DuplicateHandler
 from src.util.web import error, download_file, get_referer, get_origin, combine_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
-    check_content_type, url_is_in_domain, find_urls_in_html
+    get_content_type, url_in_domain, find_urls_in_html, get_relative_path, url_in_list, url_is_relative, join_url, is_url_exact, get_base_url, \
+    get_sub_directory_path
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
 
@@ -24,16 +26,14 @@ IGNORED_CONTENT_TYPES = [
 
 DEFAULT_GROUP_BY = GroupByMapping(
     GroupByPair(['.js'], 'js'),
+    GroupByPair(['.wasm'], 'wasm'),
     GroupByPair(['.css'], 'css'),
-    GroupByPair(['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.exif', '.webp'], 'images')
+    GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.image_matchers], 'images'),
+    GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.video_matchers], 'videos'),
+    GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.audio_matchers], 'audio'),
+    GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.font_matchers], 'fonts'),
+    GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.archive_matchers], 'archives')
 )
-
-
-def get_base_url(domain: str):
-    if domain.startswith('.'):
-        domain = domain[1:]
-
-    return domain
 
 
 def wait_page_load(driver: WebDriver):
@@ -41,13 +41,6 @@ def wait_page_load(driver: WebDriver):
 
     while page_state != 'complete':
         sleep(1)
-
-
-def is_url_exact(u1: str, u2: str):
-    smallest = u1 if min(len(u1), len(u2)) == len(u1) else u2
-    largest = u2 if u1 == smallest else u1
-
-    return smallest + '/' == largest
 
 
 def driver_go_and_wait(driver: WebDriver, url: str, fail: int = 0):
@@ -133,13 +126,13 @@ def scrape(config: Config):
     print('All jobs completed!')
 
 
-def scrape_website(driver, config, base_url):
+def scrape_website(driver: WebDriver, config: Config, base_url: str):
     out_dir = combine_path(config.out_dir, base_url[len(base_url):])
 
     scrape_page(driver, config, base_url, base_url, out_dir, follow_links=True)
 
 
-def scrape_single_page(driver, config):
+def scrape_single_page(driver: WebDriver, config: Config):
     print('Beginning URL downloads.')
     for i in range(len(config.urls)):
         print(f'Starting download of page {i + 1}/{len(config.urls)}.')
@@ -162,8 +155,8 @@ def default_origin_headers(driver: WebDriver) -> List[Tuple[str, str]]:
     ]
 
 
-def download_element(driver: WebDriver, src_url: str, base_url: str, out_dir: str = None, title: str = None, current_index: int = -1, length: int = -1,
-                     user_agent: str = None, group_by: GroupByMapping = None) -> Optional[str]:
+def download_element(driver: WebDriver, src_url: str, out_dir: str = None, title: str = None, current_index: int = -1, length: int = -1, user_agent: str = None,
+                     group_by: GroupByMapping = None) -> Optional[str]:
     full_path = None
     filename = None
     if title:
@@ -192,33 +185,23 @@ def download_element(driver: WebDriver, src_url: str, base_url: str, out_dir: st
     return downloaded_file.filename
 
 
-def get_relative_path(file: str, directory: str):
-    directory = directory.replace('\\', '/')
-
-    size = len(directory)
-    if not directory.endswith('/'):
-        size += 1
-
-    ret = './' + file[size:]
-
-    return ret.replace('\\', '/')
-
-
-def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, follow_links: bool = True):
+def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, follow_links: bool = True,
+                completed_pages: List[ParseResult] = None):
     driver_go_and_wait(driver, url)
 
+    page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
     title = get_content_title(driver, content_name=config.content_name)
 
     downloaded_elements = []
     if config.scrape_elements & ScrapeElements.VIDEOS:
-        video_out_dir = combine_path(out_dir, '/videos')
-        elements = scrape_generic_content(driver, config, base_url, title, 'video', 'src', video_out_dir, src_element='source')
+        video_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/videos')
+        elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
 
         downloaded_elements.extend(elements)
 
     if config.scrape_elements & ScrapeElements.IMAGES:
-        image_out_dir = combine_path(out_dir, '/images')
-        elements = scrape_generic_content(driver, config, base_url, title, 'img', 'src', image_out_dir)
+        image_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/images')
+        elements = scrape_generic_content(driver, config, title, 'img', 'src', image_out_dir)
 
         downloaded_elements.extend(elements)
 
@@ -226,40 +209,60 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         completed_urls = distinct([b for a, b in downloaded_elements])
 
         urls = find_urls_in_html(str(driver.page_source))
-        urls = distinct(urls, compare_lst=completed_urls)
+        urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
         for i in range(len(urls)):
-            url = urls[i]
+            file_url, original_url = urls[i]
 
-            if url_is_in_domain(base_url, url) or check_content_type(url, headers=default_origin_headers(driver)) == 'text/html':
+            if url_in_domain(base_url, file_url) or get_content_type(file_url, headers=default_origin_headers(driver)) == 'text/html':
                 continue
 
-            filename = download_element(driver, urls[i], base_url, out_dir=out_dir, title=title, current_index=i, length=len(urls),
-                                        user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
+            content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
+            filename = download_element(driver, file_url, out_dir=content_out_dir, title=title, current_index=i, length=len(urls), user_agent=config.user_agent,
+                                        group_by=DEFAULT_GROUP_BY)
 
             if not filename:
                 continue
 
-            downloaded_elements.append((filename, urls[i]))
+            downloaded_elements.append((filename, original_url if original_url else file_url))
 
-        # elements = scrape_generic_content(driver, config, title, 'link', 'href', out_dir, group_by=DEFAULT_GROUP_BY)
-        # downloaded_elements.extend(elements)
+    if not completed_pages:
+        completed_pages = []
 
-        # elements = scrape_generic_content(driver, config, title, 'script', 'src', out_dir, group_by=DEFAULT_GROUP_BY)
-        # downloaded_elements.extend(elements)
+    completed_pages.append(urlparse(url))
 
-        store_html(driver, downloaded_elements, out_dir)
-
-    if not follow_links:
-        return
-
+    relative_links = []
+    a_hrefs = []
     a_elements = driver.find_elements_by_tag_name('a')
-    for a in a_elements:
-        src_url = a.get_attribute('href')
+    for a_element in a_elements:
+        href = a_element.get_attribute('href')
 
-        if not url_is_in_domain(base_url, src_url):
+        if url_is_relative(href):
+            href = join_url(base_url, href)
+
+        if href and url_in_domain(base_url, href):
+            if href not in relative_links:
+                relative_links.append(href)
+
+            if href not in a_hrefs and not contains_substring(href, config.substrings_to_skip):
+                a_hrefs.append(href)
+
+    for relative_link in relative_links:
+        sub_dir = get_sub_directory_path(base_url, relative_link, append_slash=False)
+        filename = combine_path(out_dir, sub_dir, 'index.html')
+
+        downloaded_elements.append((filename, f'\'{relative_link}\''))
+        downloaded_elements.append((filename, f'\'{sub_dir}\''))
+        downloaded_elements.append((filename, f'"{relative_link}"'))
+        downloaded_elements.append((filename, f'"{sub_dir}"'))
+
+    store_html(driver, downloaded_elements, page_out_dir)
+
+    for src_url in a_hrefs:
+        if url_in_list(src_url, completed_pages):
             continue
 
-        scrape_page(driver, config, src_url, base_url, out_dir, follow_links=True)
+        if follow_links:
+            scrape_page(driver, config, src_url, base_url, out_dir, follow_links=True, completed_pages=completed_pages)
 
 
 def store_html(driver: WebDriver, downloaded_elements: List[Tuple[str, str]], out_dir: str):
@@ -273,10 +276,10 @@ def store_html(driver: WebDriver, downloaded_elements: List[Tuple[str, str]], ou
 
         html = html.replace(elem[1], new_filename)
 
-    write_file(out_dir, html, filename='index.html')
+    write_file(out_dir, html, filename='index.html', encoding='utf-8')
 
 
-def scrape_generic_content(driver: WebDriver, config: Config, base_url: str, title: str, tag: str, link_attribute: str, out_dir: str, src_element: str = None,
+def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: str, link_attribute: str, out_dir: str, src_element: str = None,
                            group_by: GroupByMapping = None) \
         -> List[Tuple[str, str]]:
     downloaded_elements = []
@@ -295,8 +298,8 @@ def scrape_generic_content(driver: WebDriver, config: Config, base_url: str, tit
             error(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}', fatal=False)
             continue
 
-        filename = download_element(driver, src_url, base_url, out_dir=out_dir, title=title, current_index=i, length=len(tag_elements),
-                                    user_agent=config.user_agent, group_by=group_by)
+        filename = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i, length=len(tag_elements), user_agent=config.user_agent,
+                                    group_by=group_by)
 
         downloaded_elements.append((filename, src_url))
 

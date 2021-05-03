@@ -11,6 +11,7 @@
       "path": ""
     }
   ],
+  "data_directory": "data",
   "login": {
     "children": [
 
@@ -21,6 +22,9 @@
   "scrape_elements": "ALL",
   "scrape_sitemap": true,
   "scrape_type": "SINGLE_PAGE",
+  "substrings_to_skip": [
+    "forums.domain.com"
+  ],
   "urls": [
     "https://fake-website.com/"
   ],

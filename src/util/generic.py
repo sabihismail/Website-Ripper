@@ -1,5 +1,5 @@
 import sys
-from typing import Tuple, Optional, Any
+from typing import Tuple, Optional, Any, List
 
 
 def first_or_none(lst) -> Optional[Any]:
@@ -19,11 +19,26 @@ def distinct(lst, compare_lst=None):
     return new_lst
 
 
-def error(s, fatal: bool = True) -> None:
-    print(s, file=sys.stderr)
+def error(s: str, method: str = None, fatal: bool = True) -> None:
+    to_print = s
+    if method:
+        to_print = s + ' - ' + method
+
+    print(to_print, file=sys.stderr)
 
     if fatal:
         exit(-1)
+
+
+def contains_substring(s: str, lst: List[str] = None) -> bool:
+    if not lst or not s:
+        return False
+
+    for elem in lst:
+        if elem in s:
+            return True
+
+    return False
 
 
 def name_of(var) -> str:

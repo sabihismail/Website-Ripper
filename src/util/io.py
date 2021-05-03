@@ -53,6 +53,9 @@ def split_filename(s: str, fatal=False, include_ext_period: bool = False) -> Tup
 
 
 def get_file_extension(s: str, fatal=False, include_ext_period: bool = False) -> Optional[str]:
+    if '/' in s:
+        _, s = split_full_path(s)
+
     return split_filename(s, fatal=fatal, include_ext_period=include_ext_period)[1]
 
 
@@ -75,6 +78,10 @@ def split_full_path(full_path: str) -> Tuple[str, str]:
     filename = os.path.basename(full_path)
 
     return directory, filename
+
+
+def get_filename(full_path: str) -> str:
+    return split_full_path(full_path)[1]
 
 
 def get_valid_filename(directory: str, filename: str = None) -> str:
@@ -106,6 +113,9 @@ def combine_path(directory: str, *new_dirs: str) -> str:
 
         if not new_dir.startswith('/'):
             directory += '/'
+
+        if directory.endswith('/') and new_dir.startswith('/'):
+            new_dir = new_dir[1:]
 
         directory += new_dir
 
@@ -168,11 +178,11 @@ def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: Dup
     return file
 
 
-def write_file(path: str, text: str, filename: str = ''):
+def write_file(path: str, text: str, filename: str = '', encoding: str = None):
     if filename:
         path = combine_path(path, filename)
 
-    Path(path).write_text(text)
+    Path(path).write_text(text, encoding=encoding)
 
 
 def split_path_components(path: str, fatal=True, include_ext_period: bool = False):
