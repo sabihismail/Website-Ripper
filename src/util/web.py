@@ -22,6 +22,8 @@ from src.util.mimetypes_extended import mimetypes_extended
 URL_REGEX = re.compile(r'[=:] *(?:\'([^\']*)\'|"([^"]*)")| *\(([^()]*)\)')
 RELATIVE_URL_REGEX = re.compile(r'^(?!www\.|(?:http|ftp)s?://|[A-Za-z]:\\|//).*')
 
+CACHE_WEBSITE_LINKS_FILE = 'cache/website_links.db'
+
 
 class GroupByPair:
     def __init__(self, extensions: List[str], folder: str):
@@ -90,7 +92,7 @@ def get_relative_path(file: str, directory: str):
     diff_directory = len(split_directory) - similar
     diff_file = '/'.join(split_file[similar:])
 
-    ret = '/' + ('../' * diff_directory) + diff_file
+    ret = './' + ('../' * diff_directory) + diff_file
 
     return ret
 
@@ -279,7 +281,7 @@ def get_content_type_get(url: str, with_progress_bar: bool = True):
 
 
 def get_content_type_cache(url: str):
-    download_cache = shelve.open('cache.db', writeback=True)
+    download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
     cached = download_cache.get(url, default=None)
 
     if not cached:
@@ -335,7 +337,7 @@ def find_urls_in_html(html: str) -> List[Tuple[Optional[str], Optional[str]]]:
 def download_file(url: str, ideal_filename: str = None, out_dir: str = None, headers: List[Tuple[str, str]] = None, with_progress_bar: bool = True,
                   cache: bool = True, duplicate_handler: DuplicateHandler = DuplicateHandler.FIND_VALID_FILE, ignored_content_types: List[str] = None,
                   max_file_length=DEFAULT_MAX_FILENAME_LENGTH, group_by: GroupByMapping = None) -> DownloadedFile:
-    download_cache = shelve.open('cache.db', writeback=True)
+    download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
 
     if cache and url in download_cache:
         return download_cache[url]
@@ -417,7 +419,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
         if not actual_name:
             actual_name = os.path.basename(filename)
 
-    out_path = combine_path(out_dir, actual_name)
+    out_path = combine_path(out_dir, filename=actual_name)
 
     if out_dir and group_by:
         directory, filename_only, ext = split_path_components(out_path, fatal=False, include_ext_period=True)
@@ -427,7 +429,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
             sub_dir = f'/{group_by[ext]}'
 
         filename_with_ext = join_filename_with_ext(filename_only, ext)
-        out_path = combine_path(directory, sub_dir, filename_with_ext)
+        out_path = combine_path(directory, sub_dir, filename=filename_with_ext)
 
     out_path = shorten_file_name(out_path, max_length=max_file_length)
     filename = move_file(filename, out_path, make_dirs=True, duplicate_handler=duplicate_handler)
@@ -457,14 +459,14 @@ def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.
             old_url = url
             url = new_url
 
-        block_size = 1024 * 8
-        read = 0
-        block_num = 0
         total_size = int(res_headers.get('Content-Length', failobj=0))
 
-        if with_progress_bar:
+        progress_bar = None
+        if with_progress_bar and total_size > 0:
             progress_bar = ProgressBarImpl(total_size, on_complete=lambda x: print(f'Downloaded {url} to {filename}'))
 
+        block_size = 1024 * 8
+        read = 0
         with open(filename, 'w+b') as file_stream:
             while True:
                 block: bytes = download_stream.read(block_size)
@@ -474,11 +476,8 @@ def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.
                 read += len(block)
                 file_stream.write(block)
 
-                if with_progress_bar:
-                    block_num += 1
-
-                    if not progress_bar.run(len(block)):
-                        break
+                if with_progress_bar and progress_bar and not progress_bar.run(len(block)):
+                    break
 
         if total_size >= 0 and read < total_size:
             error(f'File download incomplete, received {read} out of {total_size} bytes. URL: {url}, filename: {filename}', fatal=False)

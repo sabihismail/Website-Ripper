@@ -208,7 +208,7 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-cache.db.*
+cache/
 job.json
 job?.json
 res/chromedriver.exe

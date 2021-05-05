@@ -6,7 +6,7 @@ from typing import Tuple, Optional
 
 from src.util.generic import error, is_blank
 
-# Retrieved from https://referencesource.microsoft.com/#mscorlib/system/io/path.cs,090eca8621a248ee
+# Retrieved and modified from https://referencesource.microsoft.com/#mscorlib/system/io/path.cs,090eca8621a248ee
 INVALID_PATH_CHARACTERS = ['\"', '<', '>', '|', '\0', '*', '?'] + \
                           [chr(i) for i in range(1, 32)]
 
@@ -22,6 +22,14 @@ class DuplicateHandler(Enum):
     THROW_ERROR = 'THROW_ERROR'
     SKIP = 'SKIP'
     HASH_COMPARE = 'HASH_COMPARE'
+
+
+def ensure_directory_exists(path: str):
+    if path.startswith('/'):
+        path = combine_path(os.getcwd(), path)
+
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 
 def handle_extension_period(ext: str, include_ext_period: bool = False) -> Optional[str]:
@@ -90,36 +98,35 @@ def get_valid_filename(directory: str, filename: str = None) -> str:
 
     filename = replace_invalid_filename_characters(filename)
 
-    full_path = combine_path(directory, filename)
+    full_path = combine_path(directory, filename=filename)
     filename_only, ext = split_filename(filename, fatal=False, include_ext_period=False)
     i = 1
     while os.path.exists(full_path):
-        new_file = f'{filename_only} {i}.{ext}'
-        full_path = combine_path(directory, new_file)
+        new_file = f'{filename_only}{i}.{ext}'
+        full_path = combine_path(directory, filename=new_file)
 
         i += 1
 
     return full_path.replace('\\', '/')
 
 
-def combine_path(directory: str, *new_dirs: str) -> str:
-    directory = directory.replace('\\', '/')
+def combine_path(*directories: str, filename: str = None) -> str:
+    full_path = ''
+    for directory in directories:
+        directory = directory.replace('\\', '/')
 
-    if directory.endswith('/'):
-        directory = directory[:-1]
+        if directory.startswith('/'):
+            directory = directory[1:]
 
-    for new_dir in new_dirs:
-        new_dir = new_dir.replace('\\', '/')
-
-        if not new_dir.startswith('/'):
+        if not directory.endswith('/'):
             directory += '/'
 
-        if directory.endswith('/') and new_dir.startswith('/'):
-            new_dir = new_dir[1:]
+        full_path += directory
 
-        directory += new_dir
+    if filename:
+        full_path += filename
 
-    return directory.replace('\\', '/')
+    return full_path.replace('//', '/')
 
 
 def validate_path(directory: str, default_path: str = combine_path(os.getcwd(), '/out'), fatal: bool = False) -> str:
@@ -180,7 +187,7 @@ def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: Dup
 
 def write_file(path: str, text: str, filename: str = '', encoding: str = None):
     if filename:
-        path = combine_path(path, filename)
+        path = combine_path(path, filename=filename)
 
     Path(path).write_text(text, encoding=encoding)
 
@@ -200,7 +207,7 @@ def shorten_file_name(path, max_length=DEFAULT_MAX_FILENAME_LENGTH):
 
     filename = filename[:max_length]
 
-    return combine_path(directory, f'{filename}.{ext}')
+    return combine_path(directory, filename=f'{filename}.{ext}')
 
 
 def join_filename_with_ext(filename: str, ext: str) -> str:
@@ -210,3 +217,7 @@ def join_filename_with_ext(filename: str, ext: str) -> str:
     ext = handle_extension_period(ext, include_ext_period=True)
 
     return filename + ext
+
+
+def file_exists(path: str) -> bool:
+    return os.path.exists(path)

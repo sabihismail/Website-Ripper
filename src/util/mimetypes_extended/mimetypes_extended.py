@@ -1,6 +1,6 @@
 import mimetypes as mimetype_lib
 
-# Retrieved from https://github.com/samuelneff/MimeTypeMap/blob/master/MimeTypeMap.cs
+# Retrieved and modified from https://github.com/samuelneff/MimeTypeMap/blob/master/MimeTypeMap.cs
 MIMETYPES = [
     (".323", "text/h323"),
     (".3g2", "video/3gpp2"),

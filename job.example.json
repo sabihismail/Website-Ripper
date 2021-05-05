@@ -1,4 +1,5 @@
 {
+  "cache_completed_urls": true,
   "content_name": {
     "id": "",
     "prefix": ""
@@ -18,10 +19,13 @@
     ],
     "url": "https://fake-website.com/login"
   },
+  "max_timeout": 10.0,
+  "min_timeout": 5.0,
   "out_dir": "/path/to/downloads",
   "scrape_elements": "ALL",
   "scrape_sitemap": true,
   "scrape_type": "SINGLE_PAGE",
+  "scroll_pause_time": 1.0,
   "substrings_to_skip": [
     "forums.domain.com"
   ],

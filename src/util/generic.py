@@ -2,6 +2,17 @@ import sys
 from typing import Tuple, Optional, Any, List
 
 
+def error(s: str, method: str = None, fatal: bool = True) -> None:
+    to_print = s
+    if method:
+        to_print = s + ' - ' + method
+
+    print(to_print, file=sys.stderr)
+
+    if fatal:
+        exit(-1)
+
+
 def first_or_none(lst) -> Optional[Any]:
     if type(lst) == Tuple:
         lst = list(lst)
@@ -19,18 +30,7 @@ def distinct(lst, compare_lst=None):
     return new_lst
 
 
-def error(s: str, method: str = None, fatal: bool = True) -> None:
-    to_print = s
-    if method:
-        to_print = s + ' - ' + method
-
-    print(to_print, file=sys.stderr)
-
-    if fatal:
-        exit(-1)
-
-
-def contains_substring(s: str, lst: List[str] = None) -> bool:
+def any_list_in_str(s: str, lst: List[str] = None) -> bool:
     if not lst or not s:
         return False
 

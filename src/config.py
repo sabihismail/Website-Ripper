@@ -11,6 +11,10 @@ CONFIG_FILE = 'job.json'
 CONFIG_VAL_COOKIES = 'cookies'
 CONFIG_VAL_DATA_DIRECTORY = 'data_directory'
 CONFIG_VAL_SUBSTRINGS_TO_SKIP = 'substrings_to_skip'
+CONFIG_VAL_SCROLL_PAUSE_TIME = 'scroll_pause_time'
+CONFIG_VAL_MAX_TIMEOUT = 'max_timeout'
+CONFIG_VAL_MIN_TIMEOUT = 'min_timeout'
+CONFIG_VAL_CACHE_COMPLETED_URLS = 'cache_completed_urls'
 CONFIG_VAL_OUT_DIR = 'out_dir'
 CONFIG_VAL_SCRAPE_TYPE = 'scrape_type'
 CONFIG_VAL_SCRAPE_ELEMENTS = 'scrape_elements'
@@ -103,7 +107,8 @@ class Config:
     """
     def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None, cookies: List[Cookie] = None, content_name: ContentName = None,
                  user_agent: str = None, login: Login = None, scrape_elements: ScrapeElements = None, scrape_sitemap: bool = True,
-                 data_directory: str = 'data', substrings_to_skip: List[str] = None):
+                 data_directory: str = 'data', substrings_to_skip: List[str] = None, scroll_pause_time: float = 1.0, min_timeout: float = 5.0,
+                 max_timeout: float = 10.0, cache_completed_urls: bool = True):
         self.scrape_type = scrape_type
         self.urls: List[str] = [] if urls is None else urls
         self.out_dir = out_dir
@@ -115,6 +120,10 @@ class Config:
         self.scrape_sitemap = scrape_sitemap
         self.data_directory = data_directory
         self.substrings_to_skip = substrings_to_skip
+        self.scroll_pause_time = scroll_pause_time
+        self.min_timeout = min_timeout
+        self.max_timeout = max_timeout
+        self.cache_completed_urls = cache_completed_urls
 
     def __repr__(self):
         return str(self.__dict__)
@@ -191,6 +200,10 @@ def json_to_config(obj) -> Config:
     user_agent = json_parse(obj, CONFIG_VAL_USER_AGENT, default=None)
     data_directory: str = json_parse(obj, CONFIG_VAL_DATA_DIRECTORY, default='data')
     substrings_to_skip: List[str] = json_parse(obj, CONFIG_VAL_SUBSTRINGS_TO_SKIP, default=None)
+    scroll_pause_time: float = json_parse(obj, CONFIG_VAL_SCROLL_PAUSE_TIME, default=1.0)
+    min_timeout: float = json_parse(obj, CONFIG_VAL_MIN_TIMEOUT, default=5.0)
+    max_timeout: float = json_parse(obj, CONFIG_VAL_MAX_TIMEOUT, default=10.0)
+    cache_completed_urls: bool = json_parse(obj, CONFIG_VAL_CACHE_COMPLETED_URLS, default=True)
     content_name = parse_content_name(obj)
     login = parse_login(obj)
 
@@ -198,7 +211,8 @@ def json_to_config(obj) -> Config:
     cookies = [Cookie(dictionary=cookie) for cookie in cookies_obj]
 
     config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name, user_agent=user_agent, login=login,
-                    scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap, data_directory=data_directory, substrings_to_skip=substrings_to_skip)
+                    scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap, data_directory=data_directory, substrings_to_skip=substrings_to_skip,
+                    scroll_pause_time=scroll_pause_time, min_timeout=min_timeout, max_timeout=max_timeout, cache_completed_urls=cache_completed_urls)
 
     return config
 
