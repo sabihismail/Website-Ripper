@@ -4,6 +4,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Tuple, Optional
 
+from bs4 import UnicodeDammit
+from charset_normalizer import CharsetNormalizerMatches, detect
+
 from src.util.generic import error, is_blank
 
 # Retrieved and modified from https://referencesource.microsoft.com/#mscorlib/system/io/path.cs,090eca8621a248ee
@@ -185,11 +188,21 @@ def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: Dup
     return file
 
 
-def write_file(path: str, text: str, filename: str = '', encoding: str = None):
+def write_file(path: str, text: str, filename: str = '', encoding: Optional[str] = None):
     if filename:
         path = combine_path(path, filename=filename)
 
     Path(path).write_text(text, encoding=encoding)
+
+
+def read_file(path: str, filename: str = ''):
+    if filename:
+        path = combine_path(path, filename=filename)
+
+    file_bytes = Path(path).read_bytes()
+    encoding = CharsetNormalizerMatches.from_bytes(file_bytes).best().first().encoding
+
+    return Path(path).read_text(encoding=encoding)
 
 
 def split_path_components(path: str, fatal=True, include_ext_period: bool = False):

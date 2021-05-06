@@ -3,18 +3,20 @@ import re
 import shelve
 import tempfile
 import urllib.request
+from datetime import datetime
 from enum import Enum
 from http.client import HTTPMessage
 from pathlib import Path
 from typing import List, Tuple, Optional, Union
 from urllib.parse import urlparse, ParseResult
+from xml.etree import ElementTree
 
 import validators
 from filetype import filetype
 from tldextract import tldextract
 
 from src.util.progress_bar import ProgressBarImpl
-from src.util.generic import find_nth, is_blank, error, first_or_none, name_of
+from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, KeyValuePair
 from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, combine_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
     get_file_extension, DuplicateHandler, get_filename, split_filename
 from src.util.mimetypes_extended import mimetypes_extended
@@ -65,6 +67,157 @@ class DownloadedFile:
 
     def __repr__(self):
         return str(self.__dict__)
+
+
+class RobotsTxt:
+    def __init__(self):
+        self.user_agents: List[RobotsTxtUserAgent] = []
+        self.current_user_agent: Optional[RobotsTxtUserAgent] = None
+        self.sitemap = None
+
+    def new_user_agent(self, user_agent: str):
+        if self.current_user_agent:
+            self.user_agents.append(self.current_user_agent)
+
+        self.current_user_agent = RobotsTxtUserAgent(user_agent)
+
+    def add_allowed_url(self, url: str):
+        if self.current_user_agent and url not in self.current_user_agent.allowed_urls:
+            self.current_user_agent.add_allowed_url(url)
+
+    def add_disallowed_url(self, url: str):
+        if self.current_user_agent and url not in self.current_user_agent.disallowed_urls:
+            self.current_user_agent.add_disallowed_url(url)
+
+    def set_sitemap(self, url: str):
+        if is_blank(url):
+            return
+
+        self.sitemap = url
+
+    def hit_blank(self):
+        if self.current_user_agent:
+            self.user_agents.append(self.current_user_agent)
+            self.current_user_agent = None
+
+    def parse(self, line: str):
+        if line.startswith('#'):
+            return
+        elif line.startswith('User-agent:'):
+            self.parse_user_agent(line)
+        elif line.startswith('Disallow:'):
+            self.parse_disallowed_url(line)
+        elif line.startswith('Sitemap:'):
+            self.parse_sitemap_url(line)
+        elif is_blank(line):
+            self.hit_blank()
+
+    def parse_user_agent(self, line: str):
+        user_agent = self.get_key_value(line).val
+        self.new_user_agent(user_agent)
+
+    def parse_allowed_url(self, line: str):
+        allowed_url = self.get_key_value(line).val
+        self.add_disallowed_url(allowed_url)
+
+    def parse_disallowed_url(self, line: str):
+        disallowed_url = self.get_key_value(line).val
+        self.add_disallowed_url(disallowed_url)
+
+    def parse_sitemap_url(self, line: str):
+        sitemap_url = self.get_key_value(line).val
+        self.set_sitemap(sitemap_url)
+
+    @staticmethod
+    def get_key_value(line: str) -> KeyValuePair:
+        key, val = line.split(':', 1)
+
+        return KeyValuePair(key.strip(), val.strip())
+
+    @staticmethod
+    def get_robots_txt_by_url(url: str):
+        if url.endswith('/robots.txt'):
+            robots_url = url
+        else:
+            if url.startswith('http'):
+                base_url = get_base_url(url)
+            else:
+                base_url = get_base_url('https://' + url)
+
+            robots_url = f'https://{base_url}/robots.txt'
+
+        lines = read_url_utf8(robots_url).splitlines()
+
+        robots_txt = RobotsTxt()
+        for line in lines:
+            robots_txt.parse(line)
+
+        return robots_txt
+
+
+class RobotsTxtUserAgent:
+    def __init__(self, user_agent: str):
+        self.user_agent = user_agent
+        self.allowed_urls: List[str] = []
+        self.disallowed_urls: List[str] = []
+
+    def add_allowed_url(self, url: str):
+        self.allowed_urls.append(url)
+
+    def add_disallowed_url(self, url: str):
+        self.disallowed_urls.append(url)
+
+
+class SitemapXmlURL:
+    def __init__(self, url: str, last_modified: datetime):
+        self.url = url
+        self.last_modified = last_modified
+
+
+class SitemapXml:
+    def __init__(self):
+        self.url_set: List[SitemapXmlURL] = []
+
+    def __getitem__(self, item):
+        return self.url_set[item]
+
+    def add_url(self, item: SitemapXmlURL):
+        self.url_set.append(item)
+
+    @staticmethod
+    def parse_sitemap(data: str):
+        url_set = ElementTree.fromstring(data)
+
+        sitemap = SitemapXml()
+        for url in url_set.findall('url'):
+            loc: str = url.get('loc')
+            last_modified_str: str = url.get('lastmod')
+
+            last_modified = None
+            if not is_blank(last_modified_str):
+                last_modified = datetime.fromisoformat(last_modified_str)
+
+            sitemap_url = SitemapXmlURL(url=loc, last_modified=last_modified)
+            sitemap.add_url(sitemap_url)
+
+        return sitemap
+
+    @staticmethod
+    def parse_sitemap_by_url(url: str):
+        if 'sitemap.xml' in url:
+            sitemap_url = url
+        else:
+            if url.startswith('http'):
+                base_url = get_base_url(url)
+            else:
+                base_url = get_base_url('https://' + url)
+
+            robots = RobotsTxt.get_robots_txt_by_url(base_url)
+            sitemap_url = robots.sitemap
+
+        data = read_url_utf8(sitemap_url)
+
+        return SitemapXml.parse_sitemap(data)
 
 
 def get_pure_domain(base_url: str) -> str:
@@ -334,6 +487,13 @@ def find_urls_in_html(html: str) -> List[Tuple[Optional[str], Optional[str]]]:
     return lst
 
 
+def read_url_utf8(url: str) -> str:
+    data: bytes = urllib.request.urlopen(url).read()
+    s = data.decode('utf-8')
+
+    return s
+
+
 def download_file(url: str, ideal_filename: str = None, out_dir: str = None, headers: List[Tuple[str, str]] = None, with_progress_bar: bool = True,
                   cache: bool = True, duplicate_handler: DuplicateHandler = DuplicateHandler.FIND_VALID_FILE, ignored_content_types: List[str] = None,
                   max_file_length=DEFAULT_MAX_FILENAME_LENGTH, group_by: GroupByMapping = None) -> DownloadedFile:
@@ -476,7 +636,7 @@ def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.
                 read += len(block)
                 file_stream.write(block)
 
-                if with_progress_bar and progress_bar and not progress_bar.run(len(block)):
+                if progress_bar and not progress_bar.run(len(block)):
                     break
 
         if total_size >= 0 and read < total_size:

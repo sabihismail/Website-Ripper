@@ -17,11 +17,11 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 from src.config import Config, ScrapeType, ContentName, Cookie, UIElement, UITask, ScrapeElements
 from src.util.generic import name_of, distinct, any_list_in_str
-from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path
+from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.web import error, download_file, get_referer, get_origin, combine_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
     get_content_type, url_in_domain, find_urls_in_html, get_relative_path, url_in_list, url_is_relative, join_url, is_url_exact, get_base_url, \
-    get_sub_directory_path
+    get_sub_directory_path, SitemapXml
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
 
@@ -164,7 +164,13 @@ def scrape(config: Config):
 
 
 def scrape_sitemap(base_url: str) -> List[str]:
-    return []
+    sitemap = SitemapXml.parse_sitemap_by_url(base_url)
+
+    lst = []
+    for entry in sitemap.url_set:
+        lst.append(entry.url)
+
+    return lst
 
 
 def add_completed_url_to_cache(url: str, base_url: str):
@@ -245,24 +251,36 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         downloaded_elements.extend(elements)
 
     if config.scrape_elements & ScrapeElements.HTML:
-        completed_urls = distinct([element.url for element in downloaded_elements])
+        js_files = []
 
+        content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
+        completed_urls = distinct([element.url for element in downloaded_elements])
         urls = find_urls_in_html(str(driver.page_source))
         urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
         for i in range(len(urls)):
             file_url, original_url = urls[i]
 
-            if url_in_domain(base_url, file_url) or get_content_type(file_url, headers=default_origin_headers(driver)) == 'text/html':
+            if get_content_type(file_url, headers=default_origin_headers(driver.current_url)) == 'text/html':
                 continue
 
-            content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
-            filename = download_element(driver, file_url, out_dir=content_out_dir, title=title, current_index=i, length=len(urls), user_agent=config.user_agent,
+            ideal_filename = None
+            if title:
+                ideal_filename = title + (f' - {i + 1}' if len(urls) > 1 else '')
+
+            filename = download_element(driver.current_url, file_url, out_dir=content_out_dir, filename=ideal_filename, user_agent=config.user_agent,
                                         group_by=DEFAULT_GROUP_BY)
 
             if not filename:
                 continue
 
+            if filename.endswith('.js'):
+                js_files.append(filename)
+
             downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
+        '''
+        for js_file in js_files:
+            parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
+        '''
 
     if not completed_pages:
         completed_pages = []
@@ -305,6 +323,27 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             queue.enqueue(src_url)
 
 
+def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[FileURLPair], user_agent: str,
+                  group_by: GroupByMapping = None):
+    text = read_file(filename)
+
+    completed_urls = distinct([element.url for element in downloaded_elements])
+    urls = find_urls_in_html(text)
+    urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
+    for i in range(len(urls)):
+        file_url, original_url = urls[i]
+
+        if get_content_type(file_url, headers=default_origin_headers(current_url)) == 'text/html':
+            continue
+
+        filename = download_element(current_url, file_url, out_dir=content_out_dir, user_agent=user_agent, group_by=group_by)
+
+        if not filename:
+            continue
+
+        downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
+
+
 def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
     if is_blank(content_name):
         return ''
@@ -314,24 +353,21 @@ def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
     return element.text
 
 
-def default_origin_headers(driver: WebDriver) -> List[Tuple[str, str]]:
+def default_origin_headers(url: str) -> List[Tuple[str, str]]:
     return [
-        ('Referer', get_referer(driver.current_url)),
-        ('Origin', get_origin(driver.current_url)),
+        ('Referer', get_referer(url)),
+        ('Origin', get_origin(url)),
     ]
 
 
-def download_element(driver: WebDriver, src_url: str, out_dir: str = None, title: str = None, current_index: int = -1, length: int = -1, user_agent: str = None,
-                     group_by: GroupByMapping = None) -> Optional[str]:
+def download_element(current_url: str, src_url: str, out_dir: str = None, filename: str = None, user_agent: str = None, group_by: GroupByMapping = None) \
+        -> Optional[str]:
     full_path = None
-    filename = None
-    if title:
-        filename = title + (f' - {current_index + 1}' if length > 1 else '')
 
     if out_dir:
         full_path = validate_path(out_dir)
 
-    headers = default_origin_headers(driver)
+    headers = default_origin_headers(current_url)
 
     if user_agent:
         headers.append(('User-Agent', user_agent))
@@ -341,11 +377,9 @@ def download_element(driver: WebDriver, src_url: str, out_dir: str = None, title
 
     if downloaded_file.result == DownloadedFileResult.SKIPPED:
         print(f'Skipped download {src_url}')
-
         return None
     elif downloaded_file.result == DownloadedFileResult.FAIL:
         error(f'Failed on download {src_url}', fatal=False)
-
         return None
 
     return downloaded_file.filename
@@ -399,8 +433,6 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
 
     tag_elements = driver.find_elements_by_tag_name(tag)
     for i in range(len(tag_elements)):
-        print(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.')
-
         source = tag_elements[i]
         if src_element:
             source = source.find_element_by_tag_name(src_element)
@@ -411,8 +443,13 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
             error(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}', fatal=False)
             continue
 
-        filename = download_element(driver, src_url, out_dir=out_dir, title=title, current_index=i, length=len(tag_elements), user_agent=config.user_agent,
-                                    group_by=group_by)
+        print(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.', end='\r')
+
+        ideal_filename = None
+        if title:
+            ideal_filename = title + (f' - {i + 1}' if len(tag_elements) > 1 else '')
+
+        filename = download_element(driver.current_url, src_url, out_dir=out_dir, filename=ideal_filename, user_agent=config.user_agent, group_by=group_by)
 
         downloaded_elements.append(FileURLPair(filename, src_url))
 

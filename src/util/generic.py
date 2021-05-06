@@ -1,5 +1,10 @@
 import sys
-from typing import Tuple, Optional, Any, List
+from typing import Tuple, Optional, Any, List, NamedTuple
+
+
+class KeyValuePair(NamedTuple):
+    key: Any
+    val: Any
 
 
 def error(s: str, method: str = None, fatal: bool = True) -> None:

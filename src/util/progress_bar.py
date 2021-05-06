@@ -25,7 +25,7 @@ class ProgressBarImpl:
             self.progress_bar.close()
 
             if self.on_complete and self.progress_bar.leave:
-                self.on_complete(self.total_size)
+                pass  # self.on_complete(self.total_size)
 
             return False
 
