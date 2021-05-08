@@ -212,3 +212,4 @@ cache/
 job.json
 job?.json
 res/chromedriver.exe
+generic_test.py

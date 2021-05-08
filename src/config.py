@@ -6,6 +6,8 @@ from typing import List
 from selenium.webdriver.common.by import By
 
 from src.util.generic import error
+from src.util.json_util import json_parse, json_parse_enum
+from src.util.selenium_util import UIElement, UITask
 
 CONFIG_FILE = 'job.json'
 CONFIG_VAL_COOKIES = 'cookies'
@@ -39,28 +41,13 @@ class ScrapeElements(Flag):
     VIDEOS = auto()
     IMAGES = auto()
     HTML = auto()
-    ALL = VIDEOS | IMAGES | HTML
+    IFRAMES = auto()
+    ALL = VIDEOS | IMAGES | HTML | IFRAMES
 
 
 class ScrapeType(Enum):
     SINGLE_PAGE = 0
     ALL_PAGES = 1
-
-
-class UITask(Enum):
-    GO_TO = 0
-    CLICK = 1
-
-
-class UIElement:
-    def __init__(self, identifier: str, ui_type: By, value: str = None, task: UITask = None):
-        self.identifier = identifier
-        self.ui_type = ui_type
-        self.value = value
-        self.task = task
-
-    def __repr__(self):
-        return str(self.__dict__)
 
 
 class Login:
@@ -129,16 +116,6 @@ class Config:
         return str(self.__dict__)
 
 
-def json_parse(json, key, default=None, fatal=False):
-    if key in json:
-        return json[key]
-
-    if fatal:
-        error(f'Cannot find {key} in {json}.')
-
-    return default
-
-
 def parse_content_name(obj) -> ContentName:
     content_name = None
     content_name_obj = json_parse(obj, CONFIG_VAL_CONTENT_NAME)
@@ -150,18 +127,6 @@ def parse_content_name(obj) -> ContentName:
 
     return content_name
 
-
-def json_parse_enum(obj, json_val, class_type, fatal=False):
-    val = json_parse(obj, json_val, default=None, fatal=fatal)
-
-    if not val:
-        return None
-
-    val = str(val).upper()
-    if val not in class_type.__dict__.keys():
-        error(f'Invalid Enum: {val}, Keys: {class_type.__dict__.keys()}')
-
-    return class_type.__dict__[val]
 
 
 def parse_ui_element(obj):

@@ -3,28 +3,32 @@ import re
 import shelve
 import tempfile
 import urllib.request
-from datetime import datetime
 from enum import Enum
 from http.client import HTTPMessage
 from pathlib import Path
-from typing import List, Tuple, Optional, Union
+from queue import LifoQueue
+from typing import List, Tuple, Optional, Union, NamedTuple, Any
 from urllib.parse import urlparse, ParseResult
-from xml.etree import ElementTree
 
 import validators
 from filetype import filetype
 from tldextract import tldextract
 
-from src.util.progress_bar import ProgressBarImpl
-from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, KeyValuePair
+from src.util.web.progress_bar import DownloadProgressBar
+from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, any_list_equal_str
 from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, combine_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
     get_file_extension, DuplicateHandler, get_filename, split_filename
-from src.util.mimetypes_extended import mimetypes_extended
+from src.util.web import mimetypes_extended
 
 URL_REGEX = re.compile(r'[=:] *(?:\'([^\']*)\'|"([^"]*)")| *\(([^()]*)\)')
 RELATIVE_URL_REGEX = re.compile(r'^(?!www\.|(?:http|ftp)s?://|[A-Za-z]:\\|//).*')
 
 CACHE_WEBSITE_LINKS_FILE = 'cache/website_links.db'
+
+
+class FileURLPair(NamedTuple):
+    filename: str
+    url: str
 
 
 class GroupByPair:
@@ -69,155 +73,86 @@ class DownloadedFile:
         return str(self.__dict__)
 
 
-class RobotsTxt:
-    def __init__(self):
-        self.user_agents: List[RobotsTxtUserAgent] = []
-        self.current_user_agent: Optional[RobotsTxtUserAgent] = None
-        self.sitemap = None
+def find_first_previous_char(s: str, index: int, exclude: List[str] = None):
+    if not exclude:
+        exclude = []
 
-    def new_user_agent(self, user_agent: str):
-        if self.current_user_agent:
-            self.user_agents.append(self.current_user_agent)
+    index -= 1
+    while index >= 0:
+        if s[index] not in exclude:
+            return index
 
-        self.current_user_agent = RobotsTxtUserAgent(user_agent)
+        index -= 1
 
-    def add_allowed_url(self, url: str):
-        if self.current_user_agent and url not in self.current_user_agent.allowed_urls:
-            self.current_user_agent.add_allowed_url(url)
 
-    def add_disallowed_url(self, url: str):
-        if self.current_user_agent and url not in self.current_user_agent.disallowed_urls:
-            self.current_user_agent.add_disallowed_url(url)
+def min_val(a: int, b: int, a_val: Any = None, b_val: Any = None, min_possible_val: int = 0) -> Union[Tuple[int, int], Tuple[int, int, Any, any]]:
+    if a < min_possible_val:
+        if a_val or b_val:
+            return b, a, b_val, a_val
 
-    def set_sitemap(self, url: str):
-        if is_blank(url):
-            return
+        return b, a
 
-        self.sitemap = url
+    if b < min_possible_val:
+        if a_val or b_val:
+            return a, b, a_val, b_val
 
-    def hit_blank(self):
-        if self.current_user_agent:
-            self.user_agents.append(self.current_user_agent)
-            self.current_user_agent = None
+        return a, b
 
-    def parse(self, line: str):
-        if line.startswith('#'):
-            return
-        elif line.startswith('User-agent:'):
-            self.parse_user_agent(line)
-        elif line.startswith('Disallow:'):
-            self.parse_disallowed_url(line)
-        elif line.startswith('Sitemap:'):
-            self.parse_sitemap_url(line)
-        elif is_blank(line):
-            self.hit_blank()
+    if a < b:
+        if a_val or b_val:
+            return a, b, a_val, b_val
 
-    def parse_user_agent(self, line: str):
-        user_agent = self.get_key_value(line).val
-        self.new_user_agent(user_agent)
+        return a, b
+    else:
+        if a_val or b_val:
+            return b, a, b_val, a_val
 
-    def parse_allowed_url(self, line: str):
-        allowed_url = self.get_key_value(line).val
-        self.add_disallowed_url(allowed_url)
+        return b, a
 
-    def parse_disallowed_url(self, line: str):
-        disallowed_url = self.get_key_value(line).val
-        self.add_disallowed_url(disallowed_url)
 
-    def parse_sitemap_url(self, line: str):
-        sitemap_url = self.get_key_value(line).val
-        self.set_sitemap(sitemap_url)
+def extract_json_from_text(s: str):
+    start = 0
+    if not s.startswith('[') and not s.startswith('{'):
+        bracket_i = brace_i = 1
 
-    @staticmethod
-    def get_key_value(line: str) -> KeyValuePair:
-        key, val = line.split(':', 1)
+        open_bracket = open_brace = 0
+        while (open_bracket != -1 and open_brace != -1) and start == 0:
+            open_bracket = find_nth(s, '[', bracket_i)
+            open_brace = find_nth(s, '{', brace_i)
 
-        return KeyValuePair(key.strip(), val.strip())
+            lower, higher, lower_val, higher_val = min_val(open_brace, open_bracket, '{', '[', min_possible_val=0)
 
-    @staticmethod
-    def get_robots_txt_by_url(url: str):
-        if url.endswith('/robots.txt'):
-            robots_url = url
-        else:
-            if url.startswith('http'):
-                base_url = get_base_url(url)
+            prev_lower_char = find_first_previous_char(s, lower, exclude=[' '])
+            if s[prev_lower_char] != '=' and s[prev_lower_char] != '(':
+                if lower_val == '{':
+                    brace_i += 1
+                elif lower_val == '[':
+                    bracket_i += 1
             else:
-                base_url = get_base_url('https://' + url)
+                start = lower
 
-            robots_url = f'https://{base_url}/robots.txt'
+        if start == 0:
+            return None
 
-        lines = read_url_utf8(robots_url).splitlines()
+    end = 0
+    stack = LifoQueue()
+    for i in range(start, len(s)):
+        if s[i] == '{':
+            stack.put('{')
 
-        robots_txt = RobotsTxt()
-        for line in lines:
-            robots_txt.parse(line)
+        if s[i] == '}':
+            stack.get()
 
-        return robots_txt
+        if stack.empty():
+            end = i
+            break
 
+    if end == 0:
+        print('ERROR')
 
-class RobotsTxtUserAgent:
-    def __init__(self, user_agent: str):
-        self.user_agent = user_agent
-        self.allowed_urls: List[str] = []
-        self.disallowed_urls: List[str] = []
+    json = s[start:end + 1]
 
-    def add_allowed_url(self, url: str):
-        self.allowed_urls.append(url)
-
-    def add_disallowed_url(self, url: str):
-        self.disallowed_urls.append(url)
-
-
-class SitemapXmlURL:
-    def __init__(self, url: str, last_modified: datetime):
-        self.url = url
-        self.last_modified = last_modified
-
-
-class SitemapXml:
-    def __init__(self):
-        self.url_set: List[SitemapXmlURL] = []
-
-    def __getitem__(self, item):
-        return self.url_set[item]
-
-    def add_url(self, item: SitemapXmlURL):
-        self.url_set.append(item)
-
-    @staticmethod
-    def parse_sitemap(data: str):
-        url_set = ElementTree.fromstring(data)
-
-        sitemap = SitemapXml()
-        for url in url_set.findall('url'):
-            loc: str = url.get('loc')
-            last_modified_str: str = url.get('lastmod')
-
-            last_modified = None
-            if not is_blank(last_modified_str):
-                last_modified = datetime.fromisoformat(last_modified_str)
-
-            sitemap_url = SitemapXmlURL(url=loc, last_modified=last_modified)
-            sitemap.add_url(sitemap_url)
-
-        return sitemap
-
-    @staticmethod
-    def parse_sitemap_by_url(url: str):
-        if 'sitemap.xml' in url:
-            sitemap_url = url
-        else:
-            if url.startswith('http'):
-                base_url = get_base_url(url)
-            else:
-                base_url = get_base_url('https://' + url)
-
-            robots = RobotsTxt.get_robots_txt_by_url(base_url)
-            sitemap_url = robots.sitemap
-
-        data = read_url_utf8(sitemap_url)
-
-        return SitemapXml.parse_sitemap(data)
+    return json
 
 
 def get_pure_domain(base_url: str) -> str:
@@ -371,7 +306,8 @@ def ignorable_content_type(ignored_content_types: List[str], content_type: str, 
     return check in ignored_content_types
 
 
-def add_to_cache(download_cache, *urls, headers: HTTPMessage = None, filename: str = None, result=DownloadedFileResult.SUCCESS) -> Optional[DownloadedFile]:
+def add_to_download_cache(download_cache, *urls, headers: HTTPMessage = None, filename: str = None, result=DownloadedFileResult.SUCCESS) \
+        -> Optional[DownloadedFile]:
     if len(urls) == 0:
         error(f'Cache fail, no url sent.')
 
@@ -463,7 +399,7 @@ def get_content_type(url: str, headers: List[Tuple[str, str]] = None, with_progr
     return get_content_type_get(url, with_progress_bar=with_progress_bar)
 
 
-def find_urls_in_html(html: str) -> List[Tuple[Optional[str], Optional[str]]]:
+def find_urls_in_html_or_js(html: str) -> List[Tuple[Optional[str], Optional[str]]]:
     lst = []
     for match in URL_REGEX.findall(html):
         url: Optional[str] = first_or_none(match)
@@ -508,21 +444,21 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     file_download = download_file_impl(filename, url, download_cache, with_progress_bar=with_progress_bar)
 
     if not file_download:
-        downloaded_file = add_to_cache(download_cache, url, result=DownloadedFileResult.FAIL)
+        downloaded_file = add_to_download_cache(download_cache, url, result=DownloadedFileResult.FAIL)
         return downloaded_file
 
     if type(file_download) == DownloadedFile:
         return file_download
 
     if not file_download[0]:
-        downloaded_file = add_to_cache(download_cache, url, result=DownloadedFileResult.FAIL)
+        downloaded_file = add_to_download_cache(download_cache, url, result=DownloadedFileResult.FAIL)
         return downloaded_file
 
     url, old_url, res_headers = file_download
 
     content_type = get_content_type_from_headers(res_headers)
     if ignorable_content_type(ignored_content_types, content_type):
-        downloaded_file = add_to_cache(download_cache, url, result=DownloadedFileResult.SKIPPED)
+        downloaded_file = add_to_download_cache(download_cache, url, result=DownloadedFileResult.SKIPPED)
         return downloaded_file
 
     actual_name = None
@@ -593,7 +529,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
 
     out_path = shorten_file_name(out_path, max_length=max_file_length)
     filename = move_file(filename, out_path, make_dirs=True, duplicate_handler=duplicate_handler)
-    downloaded_file = add_to_cache(download_cache, url, old_url, headers=res_headers, filename=filename)
+    downloaded_file = add_to_download_cache(download_cache, url, old_url, headers=res_headers, filename=filename)
 
     download_cache.close()  # synchronizes automatically
 
@@ -623,7 +559,7 @@ def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.
 
         progress_bar = None
         if with_progress_bar and total_size > 0:
-            progress_bar = ProgressBarImpl(total_size, on_complete=lambda x: print(f'Downloaded {url} to {filename}'))
+            progress_bar = DownloadProgressBar(total_size, on_complete=lambda x: print(f'Downloaded {url} to {filename}'))
 
         block_size = 1024 * 8
         read = 0

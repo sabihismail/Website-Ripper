@@ -3,7 +3,7 @@ from typing import Callable
 from tqdm import tqdm
 
 
-class ProgressBarImpl:
+class DownloadProgressBar:
     def __init__(self, total_size: int = 0, min_leave_size: int = 1024 * 1024 * 1, on_complete: Callable[[int], None] = None):
         self.total_size = total_size
         self.on_complete = on_complete

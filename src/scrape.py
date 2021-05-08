@@ -1,27 +1,26 @@
 import random
 import shelve
-from collections import deque
 from math import floor
 from time import sleep
-from typing import List, Tuple, Optional, NamedTuple
+from typing import List, Tuple, Optional
 from urllib.parse import urlparse, ParseResult
 
 import filetype
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
-from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.wait import WebDriverWait
 
-from src.config import Config, ScrapeType, ContentName, Cookie, UIElement, UITask, ScrapeElements
-from src.util.generic import name_of, distinct, any_list_in_str
+from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements
+from src.iframe.iframe import IFrameHandler
+from src.iframe.vimeo import VimeoIFrameHandler
+from src.util.generic import name_of, distinct, any_list_in_str, first_or_none
 from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file
 from src.util.ordered_queue import OrderedSetQueue, QueueType
-from src.util.web import error, download_file, get_referer, get_origin, combine_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
-    get_content_type, url_in_domain, find_urls_in_html, get_relative_path, url_in_list, url_is_relative, join_url, is_url_exact, get_base_url, \
-    get_sub_directory_path, SitemapXml
+from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
+from src.util.web.generic import error, download_file, get_referer, get_origin, combine_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
+    get_content_type, url_in_domain, find_urls_in_html_or_js, get_relative_path, url_in_list, url_is_relative, join_url, get_base_url, \
+    get_sub_directory_path, FileURLPair
+from src.util.web.sitemap_xml import SitemapXml
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
 
@@ -40,53 +39,11 @@ DEFAULT_GROUP_BY = GroupByMapping(
     GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.archive_matchers], 'archives')
 )
 
+DEFAULT_IFRAME_HANDLERS = [
+    VimeoIFrameHandler(),
+]
+
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
-
-
-class FileURLPair(NamedTuple):
-    filename: str
-    url: str
-
-
-def wait_page_load(driver: WebDriver):
-    page_state = driver.execute_script('return document.readyState;')
-
-    while page_state != 'complete':
-        sleep(1)
-
-
-def scroll_to_bottom(driver: WebDriver, scroll_pause_time: float = 1.0):
-    last_height = driver.execute_script('return document.body.scrollHeight - document.documentElement.scrollTop;')
-
-    while True:
-        driver.execute_script('''
-            window.scrollBy({
-              top: window.innerHeight - 10,
-              left: 0,
-              behavior: 'smooth'
-            });
-        ''')
-
-        sleep(scroll_pause_time)
-
-        new_height = driver.execute_script('return document.body.scrollHeight - document.documentElement.scrollTop;')
-        if new_height == last_height:
-            break
-
-        last_height = new_height
-
-
-def driver_go_and_wait(driver: WebDriver, url: str, scroll_pause_time: float, fail: int = 0):
-    if fail >= 5:
-        error(f'URL does not ever match, {url} never becomes {driver.current_url}')
-
-    driver.get(url)
-    wait_page_load(driver)
-
-    if not is_url_exact(driver.current_url, url):
-        driver_go_and_wait(driver, url, fail + 1)
-
-    scroll_to_bottom(driver, scroll_pause_time=scroll_pause_time)
 
 
 def get_mapped_cookies(cookies: List[Cookie]):
@@ -98,21 +55,6 @@ def get_mapped_cookies(cookies: List[Cookie]):
         mapping.append((f'https://{domain}', elem))
 
     return mapping
-
-
-def get_ui_element(driver: WebDriver, element: UIElement, timeout=30, fatal=True) -> Optional[WebElement]:
-    specifier = (element.ui_type, element.identifier)
-
-    try:
-        wait = WebDriverWait(driver, timeout)
-        found_element = wait.until(expected_conditions.visibility_of_element_located(specifier))
-
-        return found_element
-    except TimeoutException:
-        if fatal:
-            exit(f'Could not find {element}')
-        else:
-            return None
 
 
 def scrape(config: Config):
@@ -153,6 +95,7 @@ def scrape(config: Config):
                     driver.switch_to.frame(element)
                 elif child.task == UITask.CLICK:
                     element.click()
+                    wait_page_redirect(driver, driver.current_url)
 
     if config.scrape_type == ScrapeType.SINGLE_PAGE:
         scrape_single_page(driver, config)
@@ -230,7 +173,7 @@ def scrape_single_page(driver: WebDriver, config: Config):
 
 
 def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, queue: Optional[OrderedSetQueue],
-                completed_pages: List[ParseResult] = None):
+                completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None):
     page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
     index_path = combine_path(page_out_dir, filename='index.html')
 
@@ -239,48 +182,27 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
     title = get_content_title(driver, content_name=config.content_name)
     downloaded_elements: List[FileURLPair] = []
     if config.scrape_elements & ScrapeElements.VIDEOS:
-        video_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/videos')
-        elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
-
-        downloaded_elements.extend(elements)
+        scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title)
 
     if config.scrape_elements & ScrapeElements.IMAGES:
-        image_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/images')
-        elements = scrape_generic_content(driver, config, title, 'img', 'src', image_out_dir)
-
-        downloaded_elements.extend(elements)
+        scrape_image_elements(downloaded_elements, config, driver, page_out_dir, title)
 
     if config.scrape_elements & ScrapeElements.HTML:
-        js_files = []
+        scrape_html_elements(downloaded_elements, config, driver, page_out_dir, title)
 
-        content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
-        completed_urls = distinct([element.url for element in downloaded_elements])
-        urls = find_urls_in_html(str(driver.page_source))
-        urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
-        for i in range(len(urls)):
-            file_url, original_url = urls[i]
+    if config.scrape_elements & ScrapeElements.IFRAMES:
+        if not iframe_handlers:
+            iframe_handlers = DEFAULT_IFRAME_HANDLERS
 
-            if get_content_type(file_url, headers=default_origin_headers(driver.current_url)) == 'text/html':
-                continue
+        iframes = driver.find_elements_by_tag_name('iframe')
+        for iframe in iframes:
+            iframe_handler = first_or_none(iframe_handlers, lambda x: x.can_handle(iframe))
 
-            ideal_filename = None
-            if title:
-                ideal_filename = title + (f' - {i + 1}' if len(urls) > 1 else '')
+            if iframe_handler is not None:
+                driver.switch_to.frame(iframe)
+                iframe_handler.handle(driver)
 
-            filename = download_element(driver.current_url, file_url, out_dir=content_out_dir, filename=ideal_filename, user_agent=config.user_agent,
-                                        group_by=DEFAULT_GROUP_BY)
-
-            if not filename:
-                continue
-
-            if filename.endswith('.js'):
-                js_files.append(filename)
-
-            downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
-        '''
-        for js_file in js_files:
-            parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
-        '''
+            driver.switch_to.default_content()
 
     if not completed_pages:
         completed_pages = []
@@ -323,12 +245,56 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             queue.enqueue(src_url)
 
 
+def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, title):
+    js_files = []
+    content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
+    completed_urls = distinct([element.url for element in downloaded_elements])
+    urls = find_urls_in_html_or_js(str(driver.page_source))
+    urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
+    for i in range(len(urls)):
+        file_url, original_url = urls[i]
+
+        if get_content_type(file_url, headers=default_origin_headers(driver.current_url)) == 'text/html':
+            continue
+
+        ideal_filename = None
+        if title:
+            ideal_filename = title + (f' - {i + 1}' if len(urls) > 1 else '')
+
+        filename = download_element(driver.current_url, file_url, out_dir=content_out_dir, filename=ideal_filename, user_agent=config.user_agent,
+                                    group_by=DEFAULT_GROUP_BY)
+
+        if not filename:
+            continue
+
+        if filename.endswith('.js'):
+            js_files.append(filename)
+
+        downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
+    '''
+        for js_file in js_files:
+            parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
+        '''
+
+
+def scrape_image_elements(downloaded_elements, config, driver, page_out_dir, title):
+    image_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/images')
+    elements = scrape_generic_content(driver, config, title, 'img', 'src', image_out_dir)
+    downloaded_elements.extend(elements)
+
+
+def scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title):
+    video_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/videos')
+    elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
+    downloaded_elements.extend(elements)
+
+
 def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[FileURLPair], user_agent: str,
                   group_by: GroupByMapping = None):
     text = read_file(filename)
 
     completed_urls = distinct([element.url for element in downloaded_elements])
-    urls = find_urls_in_html(text)
+    urls = find_urls_in_html_or_js(text)
     urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
     for i in range(len(urls)):
         file_url, original_url = urls[i]
@@ -345,7 +311,7 @@ def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloa
 
 
 def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
-    if is_blank(content_name):
+    if not content_name:
         return ''
 
     element = driver.find_element_by_xpath(content_name.identifier)

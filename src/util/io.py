@@ -4,8 +4,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Tuple, Optional
 
-from bs4 import UnicodeDammit
-from charset_normalizer import CharsetNormalizerMatches, detect
+from charset_normalizer import CharsetNormalizerMatches
 
 from src.util.generic import error, is_blank
 

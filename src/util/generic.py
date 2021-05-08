@@ -1,5 +1,5 @@
 import sys
-from typing import Tuple, Optional, Any, List, NamedTuple
+from typing import Tuple, Optional, Any, List, NamedTuple, Callable
 
 
 class KeyValuePair(NamedTuple):
@@ -18,11 +18,11 @@ def error(s: str, method: str = None, fatal: bool = True) -> None:
         exit(-1)
 
 
-def first_or_none(lst) -> Optional[Any]:
+def first_or_none(lst, func: Callable = lambda x: x) -> Optional[Any]:
     if type(lst) == Tuple:
         lst = list(lst)
 
-    return next(iter(filter(lambda x: x, lst)), None)
+    return next(iter(filter(func, lst)), None)
 
 
 def distinct(lst, compare_lst=None):
@@ -46,6 +46,17 @@ def any_list_in_str(s: str, lst: List[str] = None) -> bool:
     return False
 
 
+def any_list_equal_str(s: str, lst: List[str] = None) -> bool:
+    if not lst or not s:
+        return False
+
+    for elem in lst:
+        if elem == s:
+            return True
+
+    return False
+
+
 def name_of(var) -> str:
     return f'{var=}'.split('=')[0]
 
@@ -60,5 +71,5 @@ def find_nth(haystack, needle, n):
     return start
 
 
-def is_blank(s) -> bool:
+def is_blank(s: str) -> bool:
     return not s or s.isspace()
