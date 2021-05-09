@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from src.util.generic import KeyValuePair, is_blank
-from src.util.web.generic import get_base_url
+from src.util.web.generic import get_base_url, read_url_utf8
 
 
 class RobotsTxt:

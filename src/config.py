@@ -128,7 +128,6 @@ def parse_content_name(obj) -> ContentName:
     return content_name
 
 
-
 def parse_ui_element(obj):
     identifier = json_parse(obj, CONFIG_VAL_LOGIN_ELEMENT_ID, fatal=True)
     value = json_parse(obj, CONFIG_VAL_LOGIN_ELEMENT_VALUE, default=None)

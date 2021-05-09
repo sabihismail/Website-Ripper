@@ -8,6 +8,7 @@ from src.iframe.iframe import IFrameHandler
 from src.util.generic import first_or_none
 from src.util.json_util import json_parse, json_parse_class_list, json_parse_class_list_with_items
 from src.util.web.generic import FileURLPair, extract_json_from_text
+from src.util.web.stream_download import download_stream
 
 
 class VimeoIFrameRequestFilesProgressive:
@@ -112,7 +113,9 @@ class VimeoIFrameHandler(IFrameHandler):
         json_str = extract_json_from_text(script)
         json_obj = json.loads(json_str)
 
-        script = self.parse_json(json_obj)
+        script = VimeoIFrameHandler.parse_json(json_obj)
+        cdn_url = script.request.files.dash.first_cdn().url
+        file = download_stream(cdn_url, script.request.files.dash.best().identifier)
 
         return lst
 

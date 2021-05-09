@@ -8,7 +8,7 @@ from http.client import HTTPMessage
 from pathlib import Path
 from queue import LifoQueue
 from typing import List, Tuple, Optional, Union, NamedTuple, Any
-from typing.io import BinaryIO
+from typing.io import IO
 from urllib.parse import urlparse, ParseResult
 
 import validators
@@ -264,9 +264,9 @@ def join_url(url: str, *paths: str):
                 path = path[3:]
 
                 if url.endswith('/'):
-                    url = url[0:find_nth_reverse(url, '/', 2) + 1]
+                    url = url[:find_nth_reverse(url, '/', 2) + 1]
                 else:
-                    url = url[0:find_nth_reverse(url, '/', 1) + 1]
+                    url = url[:find_nth_reverse(url, '/', 1) + 1]
 
         url += path
 
@@ -295,11 +295,11 @@ def get_base_url(domain: str) -> str:
 
 
 def get_referer(s: str):
-    return s[0:find_nth(s, '/', 3) + 1]
+    return s[:find_nth(s, '/', 3) + 1]
 
 
 def get_origin(s: str) -> str:
-    return s[0:find_nth(s, '/', 3)]
+    return s[:find_nth(s, '/', 3)]
 
 
 def configure_urllib_opener(headers: List[Tuple[str, str]]):
@@ -351,7 +351,7 @@ def get_content_type_from_headers(res_headers):
         return None
 
     if ';' in content_type:
-        content_type = content_type[0:content_type.index(';')].strip()
+        content_type = content_type[:content_type.index(';')].strip()
 
     return content_type
 
@@ -554,7 +554,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     return downloaded_file
 
 
-def download_file_stream(url: str, file_stream: BinaryIO, block_size: int = 1024 * 8, with_progress_bar: bool = True, fatal: bool = True) -> bool:
+def download_file_stream(url: str, file_stream: IO, block_size: int = 1024 * 8, with_progress_bar: bool = True, fatal: bool = True) -> bool:
     try:
         download_stream = urllib.request.urlopen(url)
     except Exception as e:
