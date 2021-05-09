@@ -702,5 +702,14 @@ def guess_type(url: str, strict: bool = True):
     return mimetype_lib.guess_type(url, strict=strict)
 
 
-def guess_extension(mimetype: str, strict: bool = True):
-    return mimetype_lib.guess_extension(mimetype, strict=strict)
+def guess_extension(mimetype: str, strict: bool = True, include_period: bool = False):
+    ext = mimetype_lib.guess_extension(mimetype, strict=strict)
+
+    if include_period:
+        if not ext.startswith('.'):
+            ext = '.' + ext
+    else:
+        if ext.startswith('.'):
+            ext = ext[1:]
+
+    return ext

@@ -1,5 +1,5 @@
 import sys
-from typing import Tuple, Optional, Any, List, NamedTuple, Callable
+from typing import Tuple, Optional, Any, List, NamedTuple, Callable, Union
 
 
 class KeyValuePair(NamedTuple):
@@ -7,8 +7,8 @@ class KeyValuePair(NamedTuple):
     val: Any
 
 
-def error(s: str, method: str = None, fatal: bool = True) -> None:
-    to_print = s
+def error(s: Union[str, Exception], method: str = None, fatal: bool = True) -> None:
+    to_print = str(s)
     if method:
         to_print = s + ' - ' + method
 
@@ -69,6 +69,16 @@ def find_nth(haystack, needle, n):
         n -= 1
 
     return start
+
+
+def find_nth_reverse(haystack, needle, n):
+    end = haystack.rfind(needle)
+
+    while end >= 0 and n > 1:
+        end = haystack.rfind(needle, 0, end - len(needle))
+        n -= 1
+
+    return end
 
 
 def is_blank(s: str) -> bool:

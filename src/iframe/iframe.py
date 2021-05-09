@@ -11,4 +11,4 @@ class IFrameHandler:
         raise NotImplemented(f'Implement can_handle function')
 
     def handle(self, driver: WebDriver) -> List[FileURLPair]:
-        raise NotImplemented(f'Implement run function')
+        raise NotImplemented(f'Implement handle function')

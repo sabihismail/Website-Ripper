@@ -198,7 +198,7 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         for iframe in iframes:
             iframe_handler = first_or_none(iframe_handlers, lambda x: x.can_handle(iframe))
 
-            if iframe_handler is not None:
+            if iframe_handler:
                 driver.switch_to.frame(iframe)
                 iframe_handler.handle(driver)
 

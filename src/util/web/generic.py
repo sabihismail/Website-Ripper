@@ -8,17 +8,18 @@ from http.client import HTTPMessage
 from pathlib import Path
 from queue import LifoQueue
 from typing import List, Tuple, Optional, Union, NamedTuple, Any
+from typing.io import BinaryIO
 from urllib.parse import urlparse, ParseResult
 
 import validators
 from filetype import filetype
 from tldextract import tldextract
 
-from src.util.web.progress_bar import DownloadProgressBar
-from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, any_list_equal_str
+from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, find_nth_reverse
 from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, combine_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
     get_file_extension, DuplicateHandler, get_filename, split_filename
 from src.util.web import mimetypes_extended
+from src.util.web.progress_bar import DownloadProgressBar
 
 URL_REGEX = re.compile(r'[=:] *(?:\'([^\']*)\'|"([^"]*)")| *\(([^()]*)\)')
 RELATIVE_URL_REGEX = re.compile(r'^(?!www\.|(?:http|ftp)s?://|[A-Za-z]:\\|//).*')
@@ -251,8 +252,25 @@ def is_url_exact(u1: str, u2: str) -> True:
     return url_in_list(u1, [urlparse(u2)])
 
 
-def join_url(url: str, path: str):
-    return urllib.parse.urljoin(url, path)
+def join_url(url: str, *paths: str):
+    for path in paths:
+        if not url.endswith('/') and not path.startswith('/') and not path.startswith('.'):
+            path = '/' + path
+
+        while path.startswith('.'):
+            if path.startswith('./'):
+                path = path[2:]
+            elif path.startswith('../'):
+                path = path[3:]
+
+                if url.endswith('/'):
+                    url = url[0:find_nth_reverse(url, '/', 2) + 1]
+                else:
+                    url = url[0:find_nth_reverse(url, '/', 1) + 1]
+
+        url += path
+
+    return url
 
 
 def url_is_relative(url) -> bool:
@@ -536,7 +554,41 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     return downloaded_file
 
 
-def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.DbfilenameShelf], with_progress_bar: bool = True) \
+def download_file_stream(url: str, file_stream: BinaryIO, block_size: int = 1024 * 8, with_progress_bar: bool = True, fatal: bool = True) -> bool:
+    try:
+        download_stream = urllib.request.urlopen(url)
+    except Exception as e:
+        error(f'Failed on: {url}', fatal=False)
+        error(e, fatal=fatal)
+        return False
+
+    with download_stream:
+        res_headers: HTTPMessage = download_stream.info()
+        total_size = int(res_headers.get('Content-Length', failobj=0))
+
+        progress_bar = None
+        if with_progress_bar and total_size > 0:
+            progress_bar = DownloadProgressBar(total_size)
+
+        read = 0
+        while True:
+            block: bytes = download_stream.read(block_size)
+            if not block:
+                break
+
+            read += len(block)
+            file_stream.write(block)
+
+            if progress_bar and not progress_bar.run(len(block)):
+                break
+
+        if total_size >= 0 and read < total_size:
+            return False
+
+    return True
+
+
+def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.DbfilenameShelf], block_size: int = 1024 * 8, with_progress_bar: bool = True) \
         -> Union[Tuple[str, str, HTTPMessage], DownloadedFile, None]:
     try:
         download_stream = urllib.request.urlopen(url)
@@ -561,7 +613,6 @@ def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.
         if with_progress_bar and total_size > 0:
             progress_bar = DownloadProgressBar(total_size, on_complete=lambda x: print(f'Downloaded {url} to {filename}'))
 
-        block_size = 1024 * 8
         read = 0
         with open(filename, 'w+b') as file_stream:
             while True:
