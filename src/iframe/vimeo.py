@@ -5,9 +5,11 @@ from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
 from src.iframe.iframe import IFrameHandler
+from src.scrape import ScrapeJobType, ScrapeJob, ScrapeJobTask
 from src.util.generic import first_or_none
+from src.util.io import DuplicateHandler
 from src.util.json_util import json_parse, json_parse_class_list, json_parse_class_list_with_items
-from src.util.web.generic import FileURLPair, extract_json_from_text
+from src.util.web.generic import extract_json_from_text, download_file, DownloadedFileResult, get_filename_from_url
 from src.util.web.stream_download import download_stream
 
 
@@ -19,6 +21,10 @@ class VimeoIFrameRequestFilesProgressive:
         self.fps = fps
         self.url = url
         self.quality = quality
+
+    def get_quality_number(self):
+        val = int(first_or_none(filter(str.isdigit, self.quality)))
+        return val
 
     def __repr__(self):
         return str(self.__dict__)
@@ -78,6 +84,10 @@ class VimeoIFrameRequestFiles:
         self.dash = dash
         self.progressive = progressive
 
+    def best_progressive(self) -> VimeoIFrameRequestFilesProgressive:
+        in_order = sorted(self.progressive, key=lambda x: x.get_quality_number(), reverse=True)
+        return first_or_none(in_order)
+
     def __repr__(self):
         return str(self.__dict__)
 
@@ -105,19 +115,37 @@ class VimeoIFrameHandler(IFrameHandler):
 
         return src and 'player.vimeo' in src
 
-    def handle(self, driver: WebDriver) -> List[FileURLPair]:
-        lst: List[FileURLPair] = []
-
+    def handle(self, driver: WebDriver) -> List[ScrapeJob]:
         scripts = [script.get_attribute('innerHTML') for script in driver.find_elements_by_tag_name('script')]
         script = first_or_none(scripts, lambda element: 'player.vimeo.com' in element)
-        json_str = extract_json_from_text(script)
+
+        file = VimeoIFrameHandler.download_file_from_js(script)
+
+        job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.VIDEO, file_path=file)
+
+        return [job]
+
+    @staticmethod
+    def download_file_from_js(txt: str, check_progressive_first: bool = True):
+        json_str = extract_json_from_text(txt)
         json_obj = json.loads(json_str)
 
         script = VimeoIFrameHandler.parse_json(json_obj)
+
+        if check_progressive_first and len(script.request.files.progressive) > 0:
+            progressive = script.request.files.best_progressive()
+            progressive_url = progressive.url
+
+            filename = get_filename_from_url(progressive_url)
+            downloaded_file = download_file(progressive_url, filename, duplicate_handler=DuplicateHandler.FIND_VALID_FILE)
+
+            if downloaded_file.result == DownloadedFileResult.SUCCESS:
+                return downloaded_file.filename
+
         cdn_url = script.request.files.dash.first_cdn().url
         file = download_stream(cdn_url, script.request.files.dash.best().identifier)
 
-        return lst
+        return file
 
     @staticmethod
     def parse_json(json_obj) -> VimeoIFrameScript:

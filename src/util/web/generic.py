@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shelve
@@ -7,7 +8,7 @@ from enum import Enum
 from http.client import HTTPMessage
 from pathlib import Path
 from queue import LifoQueue
-from typing import List, Tuple, Optional, Union, NamedTuple, Any
+from typing import List, Tuple, Optional, Union, Any
 from typing.io import IO
 from urllib.parse import urlparse, ParseResult
 
@@ -16,8 +17,8 @@ from filetype import filetype
 from tldextract import tldextract
 
 from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, find_nth_reverse
-from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, combine_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
-    get_file_extension, DuplicateHandler, get_filename, split_filename
+from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, join_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
+    get_file_extension, DuplicateHandler, get_filename, split_filename, ensure_directory_exists
 from src.util.web import mimetypes_extended
 from src.util.web.progress_bar import DownloadProgressBar
 
@@ -25,11 +26,6 @@ URL_REGEX = re.compile(r'[=:] *(?:\'([^\']*)\'|"([^"]*)")| *\(([^()]*)\)')
 RELATIVE_URL_REGEX = re.compile(r'^(?!www\.|(?:http|ftp)s?://|[A-Za-z]:\\|//).*')
 
 CACHE_WEBSITE_LINKS_FILE = 'cache/website_links.db'
-
-
-class FileURLPair(NamedTuple):
-    filename: str
-    url: str
 
 
 class GroupByPair:
@@ -312,6 +308,9 @@ def configure_urllib_opener(headers: List[Tuple[str, str]]):
 
 
 def ignorable_content_type(ignored_content_types: List[str], content_type: str, attempt_download_on_fail: bool = True) -> bool:
+    if not ignored_content_types or len(ignored_content_types) == 0:
+        return False
+
     if is_blank(content_type):
         return attempt_download_on_fail
 
@@ -322,6 +321,15 @@ def ignorable_content_type(ignored_content_types: List[str], content_type: str, 
         check = split[0].strip()
 
     return check in ignored_content_types
+
+
+def download_to_json(url: str) -> dict:
+    response = urllib.request.urlopen(url)
+    charset = response.info().get_param('charset') or 'utf-8'
+    data = response.read().decode(charset)
+    json_obj = json.loads(data)
+
+    return json_obj
 
 
 def add_to_download_cache(download_cache, *urls, headers: HTTPMessage = None, filename: str = None, result=DownloadedFileResult.SUCCESS) \
@@ -335,6 +343,13 @@ def add_to_download_cache(download_cache, *urls, headers: HTTPMessage = None, fi
         download_cache[url] = downloaded_file
 
     return downloaded_file
+
+
+def get_filename_ext_from_url(url: str, fatal: bool = False, include_ext_period: bool = True) -> str:
+    filename = os.path.basename(urlparse(url).path)
+    _, ext = split_filename(filename, fatal=fatal, include_ext_period=include_ext_period)
+
+    return ext
 
 
 def get_filename_from_url(url: str) -> str:
@@ -372,7 +387,7 @@ def get_content_type_head(url: str):
 
 def get_content_type_get(url: str, with_progress_bar: bool = True):
     filename = tempfile.TemporaryFile(delete=False).name
-    file_download = download_file_impl(filename, url, download_cache=None, with_progress_bar=with_progress_bar)
+    file_download = download_file_impl(url, filename, download_cache=None, with_progress_bar=with_progress_bar)
 
     if not file_download:
         return None
@@ -388,6 +403,8 @@ def get_content_type_get(url: str, with_progress_bar: bool = True):
 
 
 def get_content_type_cache(url: str):
+    ensure_directory_exists('/cache')
+
     download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
     cached = download_cache.get(url, default=None)
 
@@ -450,7 +467,9 @@ def read_url_utf8(url: str) -> str:
 
 def download_file(url: str, ideal_filename: str = None, out_dir: str = None, headers: List[Tuple[str, str]] = None, with_progress_bar: bool = True,
                   cache: bool = True, duplicate_handler: DuplicateHandler = DuplicateHandler.FIND_VALID_FILE, ignored_content_types: List[str] = None,
-                  max_file_length=DEFAULT_MAX_FILENAME_LENGTH, group_by: GroupByMapping = None) -> DownloadedFile:
+                  max_filename_length=DEFAULT_MAX_FILENAME_LENGTH, group_by: GroupByMapping = None) -> DownloadedFile:
+    ensure_directory_exists('/cache')
+
     download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
 
     if cache and url in download_cache:
@@ -459,7 +478,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     configure_urllib_opener(headers)
 
     filename = tempfile.TemporaryFile(delete=False).name
-    file_download = download_file_impl(filename, url, download_cache, with_progress_bar=with_progress_bar)
+    file_download = download_file_impl(url, filename, download_cache, with_progress_bar=with_progress_bar)
 
     if not file_download:
         downloaded_file = add_to_download_cache(download_cache, url, result=DownloadedFileResult.FAIL)
@@ -533,7 +552,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
         if not actual_name:
             actual_name = os.path.basename(filename)
 
-    out_path = combine_path(out_dir, filename=actual_name)
+    out_path = join_path(out_dir, filename=actual_name)
 
     if out_dir and group_by:
         directory, filename_only, ext = split_path_components(out_path, fatal=False, include_ext_period=True)
@@ -543,9 +562,9 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
             sub_dir = f'/{group_by[ext]}'
 
         filename_with_ext = join_filename_with_ext(filename_only, ext)
-        out_path = combine_path(directory, sub_dir, filename=filename_with_ext)
+        out_path = join_path(directory, sub_dir, filename=filename_with_ext)
 
-    out_path = shorten_file_name(out_path, max_length=max_file_length)
+    out_path = shorten_file_name(out_path, max_length=max_filename_length)
     filename = move_file(filename, out_path, make_dirs=True, duplicate_handler=duplicate_handler)
     downloaded_file = add_to_download_cache(download_cache, url, old_url, headers=res_headers, filename=filename)
 
@@ -588,7 +607,7 @@ def download_file_stream(url: str, file_stream: IO, block_size: int = 1024 * 8, 
     return True
 
 
-def download_file_impl(filename: str, url: str, download_cache: Optional[shelve.DbfilenameShelf], block_size: int = 1024 * 8, with_progress_bar: bool = True) \
+def download_file_impl(url: str, filename: str, download_cache: Optional[shelve.DbfilenameShelf], block_size: int = 1024 * 8, with_progress_bar: bool = True) \
         -> Union[Tuple[str, str, HTTPMessage], DownloadedFile, None]:
     try:
         download_stream = urllib.request.urlopen(url)

@@ -1,8 +1,9 @@
 import random
 import shelve
+from enum import Enum
 from math import floor
 from time import sleep
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, NamedTuple
 from urllib.parse import urlparse, ParseResult
 
 import filetype
@@ -14,12 +15,12 @@ from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeEl
 from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.util.generic import name_of, distinct, any_list_in_str, first_or_none
-from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file
+from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
-from src.util.web.generic import error, download_file, get_referer, get_origin, combine_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
+from src.util.web.generic import error, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
     get_content_type, url_in_domain, find_urls_in_html_or_js, get_relative_path, url_in_list, url_is_relative, join_url, get_base_url, \
-    get_sub_directory_path, FileURLPair
+    get_sub_directory_path
 from src.util.web.sitemap_xml import SitemapXml
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
@@ -46,6 +47,23 @@ DEFAULT_IFRAME_HANDLERS = [
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
 
 
+class ScrapeJobType(Enum):
+    VIDEO = 'VIDEO'
+    URL = 'URL'
+
+
+class ScrapeJobTask(Enum):
+    REPLACE = 'REPLACE'
+
+
+class ScrapeJob(NamedTuple):
+    task: ScrapeJobTask
+    scrape_job_type: ScrapeJobType
+    url: str = ''
+    file_path: str = ''
+    html: str = ''
+
+
 def get_mapped_cookies(cookies: List[Cookie]):
     domains = list(set([get_base_url(cookie.domain) for cookie in cookies]))
 
@@ -58,8 +76,6 @@ def get_mapped_cookies(cookies: List[Cookie]):
 
 
 def scrape(config: Config):
-    ensure_directory_exists('/cache')
-
     options = Options()
     options.headless = False
 
@@ -119,6 +135,7 @@ def scrape_sitemap(base_url: str) -> List[str]:
 def add_completed_url_to_cache(url: str, base_url: str):
     base_url = get_base_url(base_url)
 
+    ensure_directory_exists('/cache')
     with shelve.open(CACHE_COMPLETED_URLS_FILE, writeback=True) as url_cache:
         lst: List[str] = url_cache.get(base_url, default=[])
 
@@ -134,6 +151,7 @@ def get_non_cached_sites(urls: List[str], base_url: str, check_cache: bool = Tru
 
     base_url = get_base_url(base_url)
 
+    ensure_directory_exists('/cache')
     with shelve.open(CACHE_COMPLETED_URLS_FILE, writeback=True) as url_cache:
         lst: List[str] = url_cache.get(base_url, default=[])
 
@@ -144,7 +162,7 @@ def process_queue(queue: OrderedSetQueue, driver: WebDriver, config: Config, bas
     while not queue.empty():
         url = queue.dequeue()
 
-        out_dir = combine_path(config.out_dir, url[len(base_url):])
+        out_dir = join_path(config.out_dir, url[len(base_url):])
         scrape_page(driver, config, url, base_url, out_dir, queue if send_queue else None)
 
         if config.min_timeout or config.max_timeout:
@@ -175,12 +193,12 @@ def scrape_single_page(driver: WebDriver, config: Config):
 def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, queue: Optional[OrderedSetQueue],
                 completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None):
     page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
-    index_path = combine_path(page_out_dir, filename='index.html')
+    index_path = join_path(page_out_dir, filename='index.html')
 
     driver_go_and_wait(driver, url, config.scroll_pause_time)
 
     title = get_content_title(driver, content_name=config.content_name)
-    downloaded_elements: List[FileURLPair] = []
+    downloaded_elements: List[ScrapeJob] = []
     if config.scrape_elements & ScrapeElements.VIDEOS:
         scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title)
 
@@ -196,13 +214,26 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
 
         iframes = driver.find_elements_by_tag_name('iframe')
         for iframe in iframes:
-            iframe_handler = first_or_none(iframe_handlers, lambda x: x.can_handle(iframe))
+            iframe_handler: IFrameHandler = first_or_none(iframe_handlers, lambda x: x.can_handle(iframe))
 
             if iframe_handler:
                 driver.switch_to.frame(iframe)
-                iframe_handler.handle(driver)
 
-            driver.switch_to.default_content()
+                iframe_jobs = iframe_handler.handle(driver)
+
+                for iframe_job in iframe_jobs:
+                    if iframe_job.scrape_job_type == ScrapeJobType.VIDEO:
+                        videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
+                        iframe_job.file_path = move_file_to_dir(iframe_job.file_path, videos_out_dir)
+                        iframe_job.html = '''
+                            <video controls>
+                                <source src="{0}" type="video/mp4">
+                            </video> 
+                        '''
+
+                    downloaded_elements.append(iframe_job)
+
+                driver.switch_to.default_content()
 
     if not completed_pages:
         completed_pages = []
@@ -227,10 +258,10 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
 
     for relative_link in relative_links:
         sub_dir = get_sub_directory_path(base_url, relative_link, append_slash=False)
-        filename = combine_path(out_dir, sub_dir, filename='index.html')
+        filename = join_path(out_dir, sub_dir, filename='index.html')
 
-        downloaded_elements.append(FileURLPair(filename, relative_link))
-        downloaded_elements.append(FileURLPair(filename, sub_dir))
+        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=relative_link))
+        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=sub_dir))
 
     store_html(driver, downloaded_elements, index_path)
 
@@ -247,7 +278,7 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
 
 def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, title):
     js_files = []
-    content_out_dir = combine_path(page_out_dir, f'/{config.data_directory}')
+    content_out_dir = join_path(page_out_dir, f'/{config.data_directory}')
     completed_urls = distinct([element.url for element in downloaded_elements])
     urls = find_urls_in_html_or_js(str(driver.page_source))
     urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
@@ -270,7 +301,7 @@ def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, titl
         if filename.endswith('.js'):
             js_files.append(filename)
 
-        downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
+        downloaded_elements.append(task=ScrapeJobTask.REPLACE, object_type=ScrapeJobType.URL, file=filename, url=original_url or file_url)
     '''
         for js_file in js_files:
             parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
@@ -278,18 +309,18 @@ def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, titl
 
 
 def scrape_image_elements(downloaded_elements, config, driver, page_out_dir, title):
-    image_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/images')
+    image_out_dir = join_path(page_out_dir, f'/{config.data_directory}/images')
     elements = scrape_generic_content(driver, config, title, 'img', 'src', image_out_dir)
     downloaded_elements.extend(elements)
 
 
 def scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title):
-    video_out_dir = combine_path(page_out_dir, f'/{config.data_directory}/videos')
+    video_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
     elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
     downloaded_elements.extend(elements)
 
 
-def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[FileURLPair], user_agent: str,
+def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[ScrapeJob], user_agent: str,
                   group_by: GroupByMapping = None):
     text = read_file(filename)
 
@@ -307,7 +338,7 @@ def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloa
         if not filename:
             continue
 
-        downloaded_elements.append(FileURLPair(filename, original_url if original_url else file_url))
+        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url))
 
 
 def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
@@ -351,7 +382,7 @@ def download_element(current_url: str, src_url: str, out_dir: str = None, filena
     return downloaded_file.filename
 
 
-def modify_url_for_replace(filename: str, url: str, types: List[str] = None) -> List[FileURLPair]:
+def modify_url_for_replace(filename: str, url: str, types: List[str] = None) -> List[ScrapeJob]:
     if types is None:
         types = ['\'', '"', '()']
 
@@ -370,31 +401,37 @@ def modify_url_for_replace(filename: str, url: str, types: List[str] = None) -> 
         filename_new = f'{start}{filename}{end}'
         url_new = f'{start}{url}{end}'
 
-        lst.append(FileURLPair(filename_new, url_new))
+        lst.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename_new, url=url_new))
 
     return lst
 
 
-def store_html(driver: WebDriver, downloaded_elements: List[FileURLPair], index_file: str):
+def store_html(driver: WebDriver, downloaded_elements: List[ScrapeJob], index_file: str):
     html = str(driver.page_source)
 
+    out_dir, _ = split_full_path(index_file)
+
     for elem in downloaded_elements:
-        if not elem.filename:
-            continue
+        if elem.scrape_job_type == ScrapeJobType.URL:
+            if not elem.file_path:
+                continue
 
-        out_dir, _ = split_full_path(index_file)
-        new_filename = get_relative_path(elem[0], out_dir)
+            new_filename = get_relative_path(elem[0], out_dir)
 
-        pairings = modify_url_for_replace(new_filename, elem.url)
-        for pairing in pairings:
-            html = html.replace(pairing.url, pairing.filename)
+            pairings = modify_url_for_replace(new_filename, elem.url)
+            for pairing in pairings:
+                html = html.replace(pairing.url, pairing.file_path)
+        elif elem.scrape_job_type == ScrapeJobType.VIDEO:
+            if not elem.file_path:
+                continue
+
+            new_filename = get_relative_path(elem[0], out_dir)
 
     write_file(index_file, html, encoding='utf-8')
 
 
 def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: str, link_attribute: str, out_dir: str, src_element: str = None,
-                           group_by: GroupByMapping = None) \
-        -> List[FileURLPair]:
+                           group_by: GroupByMapping = None) -> List[ScrapeJob]:
     downloaded_elements = []
 
     tag_elements = driver.find_elements_by_tag_name(tag)
@@ -417,6 +454,6 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
 
         filename = download_element(driver.current_url, src_url, out_dir=out_dir, filename=ideal_filename, user_agent=config.user_agent, group_by=group_by)
 
-        downloaded_elements.append(FileURLPair(filename, src_url))
+        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=src_url))
 
     return downloaded_elements

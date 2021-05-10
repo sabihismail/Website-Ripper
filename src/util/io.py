@@ -28,7 +28,7 @@ class DuplicateHandler(Enum):
 
 def ensure_directory_exists(path: str):
     if path.startswith('/'):
-        path = combine_path(os.getcwd(), path)
+        path = join_path(os.getcwd(), path)
 
     if not os.path.exists(path):
         os.makedirs(path)
@@ -100,19 +100,19 @@ def get_valid_filename(directory: str, filename: str = None) -> str:
 
     filename = replace_invalid_filename_characters(filename)
 
-    full_path = combine_path(directory, filename=filename)
+    full_path = join_path(directory, filename=filename)
     filename_only, ext = split_filename(filename, fatal=False, include_ext_period=False)
     i = 1
     while os.path.exists(full_path):
         new_file = f'{filename_only}{i}.{ext}'
-        full_path = combine_path(directory, filename=new_file)
+        full_path = join_path(directory, filename=new_file)
 
         i += 1
 
     return full_path.replace('\\', '/')
 
 
-def combine_path(*directories: str, filename: str = None) -> str:
+def join_path(*directories: str, filename: str = None) -> str:
     full_path = ''
     for directory in directories:
         directory = directory.replace('\\', '/')
@@ -131,7 +131,7 @@ def combine_path(*directories: str, filename: str = None) -> str:
     return full_path.replace('//', '/')
 
 
-def validate_path(directory: str, default_path: str = combine_path(os.getcwd(), '/out'), fatal: bool = False) -> str:
+def validate_path(directory: str, default_path: str = join_path(os.getcwd(), '/out'), fatal: bool = False) -> str:
     if is_blank(directory):
         if fatal:
             error(f'Path {directory} does not exist.')
@@ -158,6 +158,50 @@ def get_sha1_hash_file(path, chunk_size: int = 1024 * 8) -> str:
             sha1.update(data)
 
     return sha1.hexdigest()
+
+
+def move_file_to_dir(old: str, new: str, make_dirs: bool = True, duplicate_handler: DuplicateHandler = None) -> str:
+    """
+    Move a file to some directory with the same name.
+
+    Example:
+        - old: /path/to/file.mp4
+        - new: /path/to/newer/dir/
+
+        - result: /path/to/newer/dir/file.mp4
+
+    :param old: Full original path
+    :param new: New directory
+    :param make_dirs:
+    :param duplicate_handler:
+    :return:
+    """
+    _, filename_only = split_full_path(old)
+    new_file = join_path(new, filename=filename_only)
+
+    return move_file(old, new_file, make_dirs=make_dirs, duplicate_handler=duplicate_handler)
+
+
+def move_file_same_dir(old: str, new: str, make_dirs: bool = True, duplicate_handler: DuplicateHandler = None) -> str:
+    """
+    Move a file to the same directory, but different name.
+
+    Example:
+        - old: /path/to/file.mp4
+        - new: new_file.mp4
+
+        - result: /path/to/new_file.mp4
+
+    :param old: Full original path
+    :param new: Only file name
+    :param make_dirs:
+    :param duplicate_handler:
+    :return:
+    """
+    directory, old_filename = split_full_path(old)
+    new_file = join_path(directory, filename=new)
+
+    return move_file(old, new_file, make_dirs=make_dirs, duplicate_handler=duplicate_handler)
 
 
 def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: DuplicateHandler = None) -> str:
@@ -189,14 +233,14 @@ def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: Dup
 
 def write_file(path: str, text: str, filename: str = '', encoding: Optional[str] = None):
     if filename:
-        path = combine_path(path, filename=filename)
+        path = join_path(path, filename=filename)
 
     Path(path).write_text(text, encoding=encoding)
 
 
 def read_file(path: str, filename: str = ''):
     if filename:
-        path = combine_path(path, filename=filename)
+        path = join_path(path, filename=filename)
 
     file_bytes = Path(path).read_bytes()
     encoding = CharsetNormalizerMatches.from_bytes(file_bytes).best().first().encoding
@@ -219,7 +263,7 @@ def shorten_file_name(path, max_length=DEFAULT_MAX_FILENAME_LENGTH):
 
     filename = filename[:max_length]
 
-    return combine_path(directory, filename=f'{filename}.{ext}')
+    return join_path(directory, filename=f'{filename}.{ext}')
 
 
 def join_filename_with_ext(filename: str, ext: str) -> str:

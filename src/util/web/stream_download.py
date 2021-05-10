@@ -3,12 +3,12 @@ import tempfile
 from typing import List, Optional, Union
 
 import ffmpeg
-import requests
 
 from src.util.generic import first_or_none, error, find_nth_reverse
+from src.util.io import move_file_same_dir, DuplicateHandler
 from src.util.json_util import json_parse_class
 from src.util.web import mimetypes_extended
-from src.util.web.generic import join_url, download_file_stream
+from src.util.web.generic import join_url, download_file_stream, download_to_json
 
 
 class JSONStreamSegment:
@@ -74,8 +74,7 @@ def download_stream(json_url: str, specific_identifier: Union[str, int]) -> str:
     base_video_url = f'{base_url}/{specific_identifier}'
     json_url = f'{base_video_url}/{url_suffix}'
 
-    resp = requests.get(json_url)
-    content = resp.json()
+    content = download_to_json(json_url)
     json_obj: JSONStream = json_parse_class(content, JSONStream)
 
     file = download_and_join_streams(json_obj, base_video_url)
@@ -90,7 +89,7 @@ def download_specific_stream_to_file(json_obj: JSONSpecificStream, json_url: str
     full_base_url = join_url(json_url, json_obj.base_url)
 
     ext = mimetypes_extended.guess_extension(json_obj.mime_type, include_period=True)
-    file_stream = tempfile.NamedTemporaryFile(suffix=ext)
+    file_stream = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
 
     init_segment = base64.b64decode(json_obj.init_segment)
     file_stream.write(init_segment)
@@ -124,7 +123,9 @@ def download_and_join_streams(json_obj: JSONStream, base_url: str) -> str:
     input_video = ffmpeg.input(video_file)
     input_audio = ffmpeg.input(audio_file)
 
-    combined_file = f'{video_json.identifier}.mkv'
-    ffmpeg.concat(input_video, input_audio, vcodec='copy', acodec='copy').output(combined_file).run()
+    out_file = tempfile.NamedTemporaryFile(suffix='.mkv', delete=False).name
+    ffmpeg.output(input_video, input_audio, out_file, vcodec='copy', acodec='copy').run(overwrite_output=True)
+
+    combined_file = move_file_same_dir(out_file, f'{video_json.identifier}.mkv', duplicate_handler=DuplicateHandler.FIND_VALID_FILE)
 
     return combined_file

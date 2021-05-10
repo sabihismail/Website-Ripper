@@ -39,7 +39,7 @@ def json_parse_enum(obj, json_val, class_type, fatal=False):
     return class_type.__dict__[val]
 
 
-def json_parse_class(json, class_type):
+def json_parse_class(json: dict, class_type: type):
     signature = inspect.signature(class_type.__init__)
     args = signature.parameters.keys()
     args = [arg for arg in args if arg != 'self']
