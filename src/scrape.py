@@ -62,6 +62,7 @@ class ScrapeJob(NamedTuple):
     url: str = ''
     file_path: str = ''
     html: str = ''
+    identifier: str = ''
 
 
 def get_mapped_cookies(cookies: List[Cookie]):
@@ -222,6 +223,8 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
                 iframe_jobs = iframe_handler.handle(driver)
 
                 for iframe_job in iframe_jobs:
+                    iframe_job.identifier = iframe.id
+
                     if iframe_job.scrape_job_type == ScrapeJobType.VIDEO:
                         videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
                         iframe_job.file_path = move_file_to_dir(iframe_job.file_path, videos_out_dir)
@@ -416,7 +419,7 @@ def store_html(driver: WebDriver, downloaded_elements: List[ScrapeJob], index_fi
             if not elem.file_path:
                 continue
 
-            new_filename = get_relative_path(elem[0], out_dir)
+            new_filename = get_relative_path(elem.file_path, out_dir)
 
             pairings = modify_url_for_replace(new_filename, elem.url)
             for pairing in pairings:
@@ -425,7 +428,7 @@ def store_html(driver: WebDriver, downloaded_elements: List[ScrapeJob], index_fi
             if not elem.file_path:
                 continue
 
-            new_filename = get_relative_path(elem[0], out_dir)
+            new_filename = get_relative_path(elem.file_path, out_dir)
 
     write_file(index_file, html, encoding='utf-8')
 
