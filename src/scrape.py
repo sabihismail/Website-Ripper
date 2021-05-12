@@ -10,6 +10,7 @@ import filetype
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.common.by import By
 
 from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements
 from src.iframe.iframe import IFrameHandler
@@ -429,6 +430,8 @@ def store_html(driver: WebDriver, downloaded_elements: List[ScrapeJob], index_fi
                 continue
 
             new_filename = get_relative_path(elem.file_path, out_dir)
+
+            start, end = find_html_tag(By.ID, elem.identifier, html)
 
     write_file(index_file, html, encoding='utf-8')
 
