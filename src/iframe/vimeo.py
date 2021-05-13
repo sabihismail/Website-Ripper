@@ -5,7 +5,7 @@ from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
 from src.iframe.iframe import IFrameHandler
-from src.scrape import ScrapeJobType, ScrapeJob, ScrapeJobTask
+from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
 from src.util.generic import first_or_none
 from src.util.io import DuplicateHandler
 from src.util.json_util import json_parse, json_parse_class_list, json_parse_class_list_with_items

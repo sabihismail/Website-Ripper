@@ -18,6 +18,22 @@ def error(s: Union[str, Exception], method: str = None, fatal: bool = True) -> N
         exit(-1)
 
 
+def ends_with_skip(txt: str, char: str, skip: List[str] = None) -> bool:
+    if not skip:
+        return txt.endswith(char)
+
+    for i in range(len(txt) - 1, -1, -1):
+        if txt[i] in skip:
+            continue
+
+        if txt[i] != char:
+            return False
+        elif txt[i] == char:
+            return True
+
+    return False
+
+
 def first_or_none(lst, func: Callable = lambda x: x) -> Optional[Any]:
     if type(lst) == Tuple:
         lst = list(lst)
@@ -61,7 +77,7 @@ def name_of(var) -> str:
     return f'{var=}'.split('=')[0]
 
 
-def find_nth(haystack, needle, n):
+def find_nth(haystack: str, needle: str, n: int) -> int:
     start = haystack.find(needle)
 
     while start >= 0 and n > 1:
@@ -71,7 +87,7 @@ def find_nth(haystack, needle, n):
     return start
 
 
-def find_nth_reverse(haystack, needle, n):
+def find_nth_reverse(haystack: str, needle: str, n: int) -> int:
     end = haystack.rfind(needle)
 
     while end >= 0 and n > 1:

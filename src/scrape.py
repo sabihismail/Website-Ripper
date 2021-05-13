@@ -1,9 +1,8 @@
 import random
 import shelve
-from enum import Enum
 from math import floor
 from time import sleep
-from typing import List, Tuple, Optional, NamedTuple
+from typing import List, Tuple, Optional
 from urllib.parse import urlparse, ParseResult
 
 import filetype
@@ -15,6 +14,7 @@ from selenium.webdriver.common.by import By
 from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements
 from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
+from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
 from src.util.generic import name_of, distinct, any_list_in_str, first_or_none
 from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir
 from src.util.ordered_queue import OrderedSetQueue, QueueType
@@ -22,6 +22,7 @@ from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and
 from src.util.web.generic import error, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
     get_content_type, url_in_domain, find_urls_in_html_or_js, get_relative_path, url_in_list, url_is_relative, join_url, get_base_url, \
     get_sub_directory_path
+from src.util.web.html_parser import find_html_tag
 from src.util.web.sitemap_xml import SitemapXml
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
@@ -46,24 +47,6 @@ DEFAULT_IFRAME_HANDLERS = [
 ]
 
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
-
-
-class ScrapeJobType(Enum):
-    VIDEO = 'VIDEO'
-    URL = 'URL'
-
-
-class ScrapeJobTask(Enum):
-    REPLACE = 'REPLACE'
-
-
-class ScrapeJob(NamedTuple):
-    task: ScrapeJobTask
-    scrape_job_type: ScrapeJobType
-    url: str = ''
-    file_path: str = ''
-    html: str = ''
-    identifier: str = ''
 
 
 def get_mapped_cookies(cookies: List[Cookie]):

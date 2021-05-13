@@ -3,7 +3,7 @@ from typing import List
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
-from src.scrape import ScrapeJob
+from src.scrape_classes import ScrapeJob
 
 
 class IFrameHandler:
