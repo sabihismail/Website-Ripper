@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 
 import ffmpeg
 
-from src.util.generic import first_or_none, error, find_nth_reverse
+from src.util.generic import first_or_none, log, find_nth_reverse, LogType
 from src.util.io import move_file_same_dir, DuplicateHandler
 from src.util.json_util import json_parse_class
 from src.util.web import mimetypes_extended
@@ -111,7 +111,7 @@ def download_and_join_streams(json_obj: JSONStream, base_url: str) -> str:
     audio_json: JSONAudioStream = first_or_none(json_obj.audio)
 
     if not video_json:
-        error(f'{json_obj} does not have video')
+        log(f'{json_obj} does not have video', log_type=LogType.ERROR)
 
     video_file = download_specific_stream_to_file(video_json, base_url)
 

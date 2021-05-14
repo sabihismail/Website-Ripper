@@ -9,7 +9,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.wait import WebDriverWait
 
-from src.util.generic import error
+from src.util.generic import log, LogType
 from src.util.web.generic import is_url_exact
 
 
@@ -46,7 +46,7 @@ def get_ui_element(driver: WebDriver, element: UIElement, timeout=30, fatal=True
 
 def driver_go_and_wait(driver: WebDriver, url: str, scroll_pause_time: float, fail: int = 0):
     if fail >= 5:
-        error(f'URL does not ever match, {url} never becomes {driver.current_url}')
+        log(f'URL does not ever match, {url} never becomes {driver.current_url}', log_type=LogType.ERROR)
 
     driver.get(url)
     wait_page_load(driver)

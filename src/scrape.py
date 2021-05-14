@@ -15,11 +15,11 @@ from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeEl
 from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
-from src.util.generic import name_of, distinct, any_list_in_str, first_or_none, replace_with_index
-from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir
+from src.util.generic import name_of, distinct, any_list_in_str, first_or_none, replace_with_index, LogType
+from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir, append_to_file
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
-from src.util.web.generic import error, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
+from src.util.web.generic import log, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
     get_content_type, url_in_domain, find_urls_in_html_or_js, get_relative_path, url_in_list, url_is_relative, join_url, get_base_url, \
     get_sub_directory_path
 from src.util.web.html_parser import find_html_tag
@@ -48,6 +48,8 @@ DEFAULT_IFRAME_HANDLERS = [
 
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
 
+NOT_HANDLED_IFRAMES = []
+
 
 def get_mapped_cookies(cookies: List[Cookie]):
     domains = list(set([get_base_url(cookie.domain) for cookie in cookies]))
@@ -70,7 +72,7 @@ def scrape(config: Config):
     driver = webdriver.Chrome(options=options, executable_path=CHROME_DRIVER_LOC)
 
     if len(config.cookies) > 0:
-        print('Configuring cookies in Selenium.')
+        log('Configuring cookies in Selenium.')
         mapped_cookies = get_mapped_cookies(config.cookies)
 
         for mapped_cookie in mapped_cookies:
@@ -82,7 +84,7 @@ def scrape(config: Config):
                 driver.add_cookie(cookie_dict)
 
     if config.login:
-        print('Configuring login credentials in Selenium.')
+        log('Configuring login credentials in Selenium.')
 
         driver.get(config.login.url)
         for child in config.login.children:
@@ -106,7 +108,7 @@ def scrape(config: Config):
         for url in config.urls:
             scrape_website(driver, config, url)
 
-    print('All jobs completed!')
+    log('All jobs completed!')
 
 
 def scrape_sitemap(base_url: str) -> List[str]:
@@ -205,7 +207,13 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
 
             if not iframe_handler:
                 outer_html = iframe.get_attribute('outerHTML')
-                print(f'IFRAME_ERROR: No handler for: {outer_html}')
+                identifier = iframe.get_attribute('id')
+                log(f'IFRAME_ERROR: No handler for: {outer_html}')
+
+                if identifier and identifier not in NOT_HANDLED_IFRAMES:
+                    NOT_HANDLED_IFRAMES.append(identifier)
+                    append_to_file('cache/failed_iframes.txt', outer_html)
+
                 continue
 
             driver.switch_to.frame(iframe)
@@ -371,10 +379,10 @@ def download_element(current_url: str, src_url: str, out_dir: str = None, filena
                                     ignored_content_types=IGNORED_CONTENT_TYPES, group_by=group_by)
 
     if downloaded_file.result == DownloadedFileResult.SKIPPED:
-        print(f'Skipped download {src_url}')
+        log(f'Skipped download {src_url}')
         return None
     elif downloaded_file.result == DownloadedFileResult.FAIL:
-        error(f'Failed on download {src_url}', fatal=False)
+        log(f'Failed on download {src_url}', fatal=False, log_type=LogType.ERROR)
         return None
 
     return downloaded_file.filename
@@ -394,7 +402,7 @@ def modify_url_for_replace(filename: str, url: str, types: List[str] = None) -> 
             start = brace_type[0]
             end = brace_type[1]
         else:
-            error(f'Unsupported number of characters in type: {brace_type}', name_of(modify_url_for_replace))
+            log(f'Unsupported number of characters in type: {brace_type}', name_of(modify_url_for_replace), log_type=LogType.ERROR)
 
         filename_new = f'{start}{filename}{end}'
         url_new = f'{start}{url}{end}'
@@ -447,10 +455,10 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
         src_url: str = source.get_attribute(link_attribute)
 
         if not src_url:
-            error(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}', fatal=False)
+            log(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}', fatal=False, log_type=LogType.ERROR)
             continue
 
-        print(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.', end='\r')
+        log(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.', end='\r')
 
         ideal_filename = None
         if title:

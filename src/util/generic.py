@@ -1,4 +1,5 @@
 import sys
+from enum import Enum
 from typing import Tuple, Optional, Any, List, NamedTuple, Callable, Union
 
 
@@ -7,14 +8,25 @@ class KeyValuePair(NamedTuple):
     val: Any
 
 
-def error(s: Union[str, Exception], method: str = None, fatal: bool = True) -> None:
+class LogType(Enum):
+    INFO = 'INFO',
+    ERROR = 'ERROR'
+
+
+def log(s: Union[str, Exception], method: str = None, fatal: bool = True, log_type: LogType = LogType.INFO, end: str = '\n') -> None:
     to_print = str(s)
     if method:
         to_print = s + ' - ' + method
 
-    print(to_print, file=sys.stderr)
+    out_file = None
+    if log_type == LogType.INFO:
+        out_file = sys.stdout
+    elif log_type == LogType.ERROR:
+        out_file = sys.stderr
 
-    if fatal:
+    print(to_print, file=out_file, end=end)
+
+    if log_type == LogType.ERROR and fatal:
         exit(-1)
 
 

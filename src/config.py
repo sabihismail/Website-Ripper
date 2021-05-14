@@ -5,7 +5,7 @@ from typing import List
 
 from selenium.webdriver.common.by import By
 
-from src.util.generic import error
+from src.util.generic import log, LogType
 from src.util.json_util import json_parse, json_parse_enum
 from src.util.selenium_util import UIElement, UITask
 
@@ -71,7 +71,7 @@ class Cookie:
                 setattr(self, key, dictionary[key])
 
         if not self.name or not self.value or not self.domain or not self.path:
-            error(f'Invalid Cookie')
+            log(f'Invalid Cookie', log_type=LogType.ERROR)
 
     def __repr__(self):
         return str(self.__dict__)
@@ -184,7 +184,7 @@ def json_to_config(obj) -> Config:
 def get_config(file=CONFIG_FILE):
     config_file = Path(file)
     if not config_file.is_file():
-        error(f'{file} not found in path')
+        log(f'{file} not found in path', log_type=LogType.ERROR)
 
     with open(file, 'r') as file_obj:
         text = ''.join(file_obj.readlines())

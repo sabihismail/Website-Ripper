@@ -16,7 +16,7 @@ import validators
 from filetype import filetype
 from tldextract import tldextract
 
-from src.util.generic import find_nth, is_blank, error, first_or_none, name_of, find_nth_reverse
+from src.util.generic import find_nth, is_blank, first_or_none, name_of, find_nth_reverse, LogType, log
 from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, join_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
     get_file_extension, DuplicateHandler, get_filename, split_filename, ensure_directory_exists
 from src.util.web import mimetypes_extended
@@ -145,7 +145,7 @@ def extract_json_from_text(s: str):
             break
 
     if end == 0:
-        print('ERROR')
+        log('Error parsing JSON', log_type=LogType.ERROR)
 
     json = s[start:end + 1]
 
@@ -184,7 +184,7 @@ def get_relative_path(file: str, directory: str):
 
 def get_sub_directory_path(base_url: str, new_url: str, prepend_dir: str = None, prepend_slash: bool = True, append_slash: bool = True) -> str:
     if not base_url:
-        error(f'Invalid params: {base_url}, {new_url}, {prepend_dir}.', name_of(get_sub_directory_path))
+        log(f'Invalid params: {base_url}, {new_url}, {prepend_dir}.', name_of(get_sub_directory_path), log_type=LogType.ERROR)
 
     if new_url.endswith('/'):
         new_url = new_url[:-1]
@@ -192,7 +192,7 @@ def get_sub_directory_path(base_url: str, new_url: str, prepend_dir: str = None,
     base_url = get_base_url(base_url)
 
     if base_url not in new_url:
-        error(f'Invalid params: {base_url}, {new_url}, {prepend_dir}.', name_of(get_sub_directory_path))
+        log(f'Invalid params: {base_url}, {new_url}, {prepend_dir}.', name_of(get_sub_directory_path), log_type=LogType.ERROR)
 
     sub_dir = new_url[new_url.index(base_url) + len(base_url):]
 
@@ -335,7 +335,7 @@ def download_to_json(url: str) -> dict:
 def add_to_download_cache(download_cache, *urls, headers: HTTPMessage = None, filename: str = None, result=DownloadedFileResult.SUCCESS) \
         -> Optional[DownloadedFile]:
     if len(urls) == 0:
-        error(f'Cache fail, no url sent.')
+        log(f'Cache fail, no url sent.', log_type=LogType.ERROR)
 
     downloaded_file = DownloadedFile(filename=filename, url=urls[0], headers=headers, result=result)
 
@@ -578,8 +578,8 @@ def download_file_stream(url: str, file_stream: IO, block_size: int = 1024 * 8, 
     try:
         download_stream = urllib.request.urlopen(url)
     except Exception as e:
-        error(f'Failed on: {url}', fatal=False)
-        error(e, fatal=fatal)
+        log(f'Failed on: {url}', fatal=False, log_type=LogType.ERROR)
+        log(e, fatal=fatal, log_type=LogType.ERROR)
         return False
 
     with download_stream:
@@ -631,7 +631,7 @@ def download_file_impl(url: str, filename: str, download_cache: Optional[shelve.
 
         progress_bar = None
         if with_progress_bar and total_size > 0:
-            progress_bar = DownloadProgressBar(total_size, on_complete=lambda x: print(f'Downloaded {url} to {filename}'))
+            progress_bar = DownloadProgressBar(total_size, on_complete=lambda x: log(f'Downloaded {url} to {filename}'))
 
         read = 0
         with open(filename, 'w+b') as file_stream:
@@ -647,6 +647,6 @@ def download_file_impl(url: str, filename: str, download_cache: Optional[shelve.
                     break
 
         if total_size >= 0 and read < total_size:
-            error(f'File download incomplete, received {read} out of {total_size} bytes. URL: {url}, filename: {filename}', fatal=False)
+            log(f'File download incomplete, received {read} out of {total_size} bytes. URL: {url}, filename: {filename}', fatal=False, log_type=LogType.ERROR)
 
     return url, old_url, res_headers

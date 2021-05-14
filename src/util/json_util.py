@@ -1,7 +1,7 @@
 import inspect
 from typing import List, get_origin, get_args
 
-from src.util.generic import error, first_or_none
+from src.util.generic import log, first_or_none, LogType
 
 SAFE_PARAMETER_MAPPING = {
     'identifier': 'id'
@@ -21,7 +21,7 @@ def json_parse(json, key, default=None, fatal=False):
         return json[key]
 
     if fatal:
-        error(f'Cannot find {key} in {json}.')
+        log(f'Cannot find {key} in {json}.', log_type=LogType.ERROR)
 
     return default
 
@@ -34,7 +34,7 @@ def json_parse_enum(obj, json_val, class_type, fatal=False):
 
     val = str(val).upper()
     if val not in class_type.__dict__.keys():
-        error(f'Invalid Enum: {val}, Keys: {class_type.__dict__.keys()}')
+        log(f'Invalid Enum: {val}, Keys: {class_type.__dict__.keys()}', log_type=LogType.ERROR)
 
     return class_type.__dict__[val]
 
@@ -62,7 +62,7 @@ def json_parse_class(json: dict, class_type: type):
             list_type = first_or_none(get_args(arg_type))
 
             if not list_type:
-                error(f'List Type {arg_type} was None, origin: {get_origin(arg_type)}')
+                log(f'List Type {arg_type} was None, origin: {get_origin(arg_type)}', log_type=LogType.ERROR)
 
             d[arg] = json_parse_class_list(json[temp_arg], list_type)
         else:

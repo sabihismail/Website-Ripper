@@ -6,7 +6,7 @@ from typing import Tuple, Optional
 
 from charset_normalizer import CharsetNormalizerMatches
 
-from src.util.generic import error, is_blank
+from src.util.generic import is_blank, LogType, log
 
 # Retrieved and modified from https://referencesource.microsoft.com/#mscorlib/system/io/path.cs,090eca8621a248ee
 INVALID_PATH_CHARACTERS = ['\"', '<', '>', '|', '\0', '*', '?'] + \
@@ -53,7 +53,7 @@ def split_filename(s: str, fatal=False, include_ext_period: bool = False) -> Tup
 
     if len(split) == 1:
         if fatal:
-            error(f'No file extension found: {s}')
+            log(f'No file extension found: {s}', log_type=LogType.ERROR)
 
         return split[0], None
 
@@ -134,7 +134,7 @@ def join_path(*directories: str, filename: str = None) -> str:
 def validate_path(directory: str, default_path: str = join_path(os.getcwd(), '/out'), fatal: bool = False) -> str:
     if is_blank(directory):
         if fatal:
-            error(f'Path {directory} does not exist.')
+            log(f'Path {directory} does not exist.', log_type=LogType.ERROR)
 
         directory = default_path
 
@@ -212,7 +212,7 @@ def move_file(old: str, new: str, make_dirs: bool = True, duplicate_handler: Dup
         if duplicate_handler == DuplicateHandler.FIND_VALID_FILE:
             new = get_valid_filename(new)
         elif duplicate_handler == DuplicateHandler.THROW_ERROR:
-            error(f'File "{new}" already exists')
+            log(f'File "{new}" already exists', log_type=LogType.ERROR)
         elif duplicate_handler == DuplicateHandler.OVERWRITE:
             os.remove(new)
         elif duplicate_handler == DuplicateHandler.SKIP:
@@ -236,6 +236,16 @@ def write_file(path: str, text: str, filename: str = '', encoding: Optional[str]
         path = join_path(path, filename=filename)
 
     Path(path).write_text(text, encoding=encoding)
+
+
+def append_to_file(path: str, text: str, filename: str = '', encoding: Optional[str] = None):
+    if filename:
+        path = join_path(path, filename=filename)
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, 'a+', encoding=encoding) as file:
+        file.write(text + '\n')
 
 
 def read_file(path: str, filename: str = ''):
