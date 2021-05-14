@@ -97,5 +97,12 @@ def find_nth_reverse(haystack: str, needle: str, n: int) -> int:
     return end
 
 
+def replace_with_index(s: str, replacement: str, start: int = 0, end: int = -1) -> str:
+    if end == -1:
+        end = len(s) - 1
+
+    return s[:start] + replacement + s[end + 1:]
+
+
 def is_blank(s: str) -> bool:
     return not s or s.isspace()

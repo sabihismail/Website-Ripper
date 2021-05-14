@@ -15,7 +15,7 @@ from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeEl
 from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
-from src.util.generic import name_of, distinct, any_list_in_str, first_or_none
+from src.util.generic import name_of, distinct, any_list_in_str, first_or_none, replace_with_index
 from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
@@ -95,8 +95,10 @@ def scrape(config: Config):
                 if child.task == UITask.GO_TO:
                     driver.switch_to.frame(element)
                 elif child.task == UITask.CLICK:
+                    old_url = driver.current_url
+
                     element.click()
-                    wait_page_redirect(driver, driver.current_url)
+                    wait_page_redirect(driver, old_url)
 
     if config.scrape_type == ScrapeType.SINGLE_PAGE:
         scrape_single_page(driver, config)
@@ -201,26 +203,30 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         for iframe in iframes:
             iframe_handler: IFrameHandler = first_or_none(iframe_handlers, lambda x: x.can_handle(iframe))
 
-            if iframe_handler:
-                driver.switch_to.frame(iframe)
+            if not iframe_handler:
+                outer_html = iframe.get_attribute('outerHTML')
+                print(f'IFRAME_ERROR: No handler for: {outer_html}')
+                continue
 
-                iframe_jobs = iframe_handler.handle(driver)
+            driver.switch_to.frame(iframe)
 
-                for iframe_job in iframe_jobs:
-                    iframe_job.identifier = iframe.id
+            iframe_jobs = iframe_handler.handle(driver)
 
-                    if iframe_job.scrape_job_type == ScrapeJobType.VIDEO:
-                        videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
-                        iframe_job.file_path = move_file_to_dir(iframe_job.file_path, videos_out_dir)
-                        iframe_job.html = '''
-                            <video controls>
-                                <source src="{0}" type="video/mp4">
-                            </video> 
-                        '''
+            driver.switch_to.default_content()
 
-                    downloaded_elements.append(iframe_job)
+            for iframe_job in iframe_jobs:
+                iframe_job.identifier = iframe.get_attribute('id')
 
-                driver.switch_to.default_content()
+                if iframe_job.scrape_job_type == ScrapeJobType.VIDEO:
+                    videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
+                    iframe_job.file_path = move_file_to_dir(iframe_job.file_path, videos_out_dir, duplicate_handler=DuplicateHandler.HASH_COMPARE)
+                    iframe_job.html = '''
+                        <video controls style="width: 100%; height: 100%;">
+                            <source src="{0}" type="video/mp4">
+                        </video> 
+                    '''
+
+                downloaded_elements.append(iframe_job)
 
     if not completed_pages:
         completed_pages = []
@@ -247,8 +253,11 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         sub_dir = get_sub_directory_path(base_url, relative_link, append_slash=False)
         filename = join_path(out_dir, sub_dir, filename='index.html')
 
-        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=relative_link))
-        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=sub_dir))
+        scrape_job_relative = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=relative_link)
+        scrape_job_sub_dir = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=sub_dir)
+
+        downloaded_elements.append(scrape_job_relative)
+        downloaded_elements.append(scrape_job_sub_dir)
 
     store_html(driver, downloaded_elements, index_path)
 
@@ -288,7 +297,8 @@ def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, titl
         if filename.endswith('.js'):
             js_files.append(filename)
 
-        downloaded_elements.append(task=ScrapeJobTask.REPLACE, object_type=ScrapeJobType.URL, file=filename, url=original_url or file_url)
+        scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url)
+        downloaded_elements.append(scrape_job)
     '''
         for js_file in js_files:
             parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
@@ -325,7 +335,8 @@ def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloa
         if not filename:
             continue
 
-        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url))
+        scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url)
+        downloaded_elements.append(scrape_job)
 
 
 def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
@@ -413,8 +424,12 @@ def store_html(driver: WebDriver, downloaded_elements: List[ScrapeJob], index_fi
                 continue
 
             new_filename = get_relative_path(elem.file_path, out_dir)
-
             start, end = find_html_tag(By.ID, elem.identifier, html)
+
+            replacement_html = elem.html.format(new_filename)
+            replaced_html = replace_with_index(html, replacement_html, start, end)
+
+            html = replaced_html
 
     write_file(index_file, html, encoding='utf-8')
 
@@ -443,6 +458,7 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
 
         filename = download_element(driver.current_url, src_url, out_dir=out_dir, filename=ideal_filename, user_agent=config.user_agent, group_by=group_by)
 
-        downloaded_elements.append(ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=src_url))
+        scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=src_url)
+        downloaded_elements.append(scrape_job)
 
     return downloaded_elements

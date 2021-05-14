@@ -436,7 +436,8 @@ def get_content_type(url: str, headers: List[Tuple[str, str]] = None, with_progr
 
 def find_urls_in_html_or_js(html: str) -> List[Tuple[Optional[str], Optional[str]]]:
     lst = []
-    for match in URL_REGEX.findall(html):
+    matches = URL_REGEX.findall(html)
+    for match in matches:
         url: Optional[str] = first_or_none(match)
 
         if not url:
@@ -515,7 +516,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
             potential_mimetype = mimetypes_extended.guess_type(potential_filename)[0]
 
         if potential_mimetype:
-            ext = mimetypes_extended.guess_extension(potential_mimetype)
+            ext = mimetypes_extended.guess_extension(potential_mimetype, include_period=True)
 
             if ext and potential_filename.endswith(ext):
                 actual_name = potential_filename
@@ -523,7 +524,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     if not actual_name or not get_file_extension(actual_name):
         ext = None
         if content_type:
-            ext = mimetypes_extended.guess_extension(content_type)
+            ext = mimetypes_extended.guess_extension(content_type, include_period=True)
 
         if ext:
             if actual_name:

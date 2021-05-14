@@ -1,7 +1,7 @@
 import re
 from enum import Enum
 from queue import LifoQueue
-from typing import NamedTuple, List, Tuple, Dict
+from typing import NamedTuple, Tuple, Dict
 
 from selenium.webdriver.common.by import By
 
@@ -77,7 +77,7 @@ def find_html_tag(by: By, identifier: str, html: str) -> Tuple[int, int]:
         if by == By.ID:
             if element.identifier() == identifier:
                 if element.tag_type == HTMLTagType.SELF_CLOSING:
-                    return element.start_index, element.end_index + 1
+                    return element.start_index, element.end_index
 
                 begin_stack = True
 
@@ -87,8 +87,7 @@ def find_html_tag(by: By, identifier: str, html: str) -> Tuple[int, int]:
             elif element.tag_type == HTMLTagType.END:
                 if stack.qsize() == 1:
                     starting_element: HTMLTag = stack.get()
-
-                    return starting_element.start_index, element.end_index + 1
+                    return starting_element.start_index, element.end_index
                 else:
                     stack.get()
 

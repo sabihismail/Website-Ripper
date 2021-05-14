@@ -636,60 +636,58 @@ MIMETYPES = [
     (".z", "application/x-compress"),
     (".zip", "application/zip"),
 
-    ("application/fsharp-script", ".fsx"),
-    ("application/msaccess", ".adp"),
-    ("application/msword", ".doc"),
-    ("application/octet-stream", ".bin"),
-    ("application/onenote", ".one"),
-    ("application/postscript", ".eps"),
-    ("application/step", ".step"),
-    ("application/vnd.ms-excel", ".xls"),
-    ("application/vnd.ms-powerpoint", ".ppt"),
-    ("application/vnd.ms-works", ".wks"),
-    ("application/vnd.visio", ".vsd"),
-    ("application/x-director", ".dir"),
-    ("application/x-msdos-program", ".exe"),
-    ("application/x-shockwave-flash", ".swf"),
-    ("application/x-x509-ca-cert", ".cer"),
-    ("application/x-zip-compressed", ".zip"),
-    ("application/xhtml+xml", ".xhtml"),
-    ("application/xml", ".xml"),  # anomaly, .xml -> text/xml, but application/xml -> many things, but all are xml, so safest is .xml
-    ("audio/aac", ".AAC"),
-    ("audio/aiff", ".aiff"),
-    ("audio/basic", ".snd"),
-    ("audio/mid", ".midi"),
-    ("audio/mp4", ".m4a"),  # one way mapping only, mime -> ext
-    ("audio/wav", ".wav"),
-    ("audio/x-m4a", ".m4a"),
-    ("audio/x-mpegurl", ".m3u"),
-    ("audio/x-pn-realaudio", ".ra"),
-    ("audio/x-smd", ".smd"),
-    ("image/bmp", ".bmp"),
-    ("image/jpeg", ".jpg"),
-    ("image/pict", ".pic"),
-    ("image/png", ".png"),  # Defined in [RFC-2045], [RFC-2048]
-    ("image/x-png", ".png"),  # See https://www.w3.org/TR/PNG/#A-Media-type :"It is recommended that implementations also recognize the media type: image/x-png
-    ("image/tiff", ".tiff"),
-    ("image/x-macpaint", ".mac"),
-    ("image/x-quicktime", ".qti"),
-    ("message/rfc822", ".eml"),
-    ("text/calendar", ".ics"),
-    ("text/html", ".html"),
-    ("text/plain", ".txt"),
-    ("text/scriptlet", ".wsc"),
-    ("text/xml", ".xml"),
-    ("video/3gpp", ".3gp"),
-    ("video/3gpp2", ".3gp2"),
-    ("video/mp4", ".mp4"),
-    ("video/mpeg", ".mpg"),
-    ("video/quicktime", ".mov"),
-    ("video/vnd.dlna.mpeg-tts", ".m2t"),
-    ("video/x-dv", ".dv"),
-    ("video/x-la-asf", ".lsf"),
-    ("video/x-ms-asf", ".asf"),
-    ("x-world/x-vrml", ".xof"),
-
-    ("text/javascript", ".js")
+    (".adp", "application/msaccess"),
+    (".doc", "application/msword"),
+    (".bin", "application/octet-stream"),
+    (".one", "application/onenote"),
+    (".eps", "application/postscript"),
+    (".step", "application/step"),
+    (".xls", "application/vnd.ms-excel"),
+    (".ppt", "application/vnd.ms-powerpoint"),
+    (".wks", "application/vnd.ms-works"),
+    (".vsd", "application/vnd.visio"),
+    (".dir", "application/x-director"),
+    (".exe", "application/x-msdos-program"),
+    (".swf", "application/x-shockwave-flash"),
+    (".cer", "application/x-x509-ca-cert"),
+    (".zip", "application/x-zip-compressed"),
+    (".xhtml", "application/xhtml+xml"),
+    (".xml", "application/xml"),  # anomaly, .xml -> text/xml, but application/xml -> many things, but all are xml, so safest is .xml
+    (".AAC", "audio/aac"),
+    (".aiff", "audio/aiff"),
+    (".snd", "audio/basic"),
+    (".midi", "audio/mid"),
+    (".m4a", "audio/mp4"),  # one way mapping only, mime -> ext
+    (".wav", "audio/wav"),
+    (".m4a", "audio/x-m4a"),
+    (".m3u", "audio/x-mpegurl"),
+    (".ra", "audio/x-pn-realaudio"),
+    (".smd", "audio/x-smd"),
+    (".bmp", "image/bmp"),
+    (".jpg", "image/jpeg"),
+    (".pic", "image/pict"),
+    (".png", "image/png"),  # Defined in [RFC-2045], [RFC-2048]
+    (".png", "image/x-png"),  # See https://www.w3.org/TR/PNG/#A-Media-type :"It is recommended that implementations also recognize the media type: image/x-png
+    (".tiff", "image/tiff"),
+    (".mac", "image/x-macpaint"),
+    (".qti", "image/x-quicktime"),
+    (".eml", "message/rfc822"),
+    (".ics", "text/calendar"),
+    (".html", "text/html"),
+    (".txt", "text/plain"),
+    (".wsc", "text/scriptlet"),
+    (".xml", "text/xml"),
+    (".3gp", "video/3gpp"),
+    (".3gp2", "video/3gpp2"),
+    (".mp4", "video/mp4"),
+    (".mpg", "video/mpeg"),
+    (".mov", "video/quicktime"),
+    (".m2t", "video/vnd.dlna.mpeg-tts"),
+    (".dv", "video/x-dv"),
+    (".lsf", "video/x-la-asf"),
+    (".asf", "video/x-ms-asf"),
+    (".xof", "x-world/x-vrml"),
+    (".js", "text/javascript"),
 ]
 
 mimetype_lib.init()
@@ -704,6 +702,9 @@ def guess_type(url: str, strict: bool = True):
 
 def guess_extension(mimetype: str, strict: bool = True, include_period: bool = False):
     ext = mimetype_lib.guess_extension(mimetype, strict=strict)
+
+    if not ext:
+        return None
 
     if include_period:
         if not ext.startswith('.'):

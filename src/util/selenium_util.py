@@ -66,7 +66,7 @@ def wait_page_load(driver: WebDriver):
 
 def wait_page_redirect(driver: WebDriver, current_url: str):
     wait = WebDriverWait(driver, 10)
-    wait.until_not(expected_conditions.url_to_be(current_url))
+    wait.until(expected_conditions.url_changes(current_url))
 
     wait_page_load(driver)
 

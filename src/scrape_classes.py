@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import NamedTuple
 
 
 class ScrapeJobType(Enum):
@@ -11,10 +10,14 @@ class ScrapeJobTask(Enum):
     REPLACE = 'REPLACE'
 
 
-class ScrapeJob(NamedTuple):
-    task: ScrapeJobTask
-    scrape_job_type: ScrapeJobType
-    url: str = ''
-    file_path: str = ''
-    html: str = ''
-    identifier: str = ''
+class ScrapeJob:
+    def __init__(self, task: ScrapeJobTask, scrape_job_type: ScrapeJobType, url: str = '', file_path: str = '', html: str = '', identifier: str = ''):
+        self.task = task
+        self.scrape_job_type = scrape_job_type
+        self.url = url
+        self.file_path = file_path
+        self.html = html
+        self.identifier = identifier
+
+    def __repr__(self):
+        return str(self.__dict__)

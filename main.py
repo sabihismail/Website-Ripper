@@ -3,6 +3,13 @@ import sys
 from src.config import CONFIG_FILE, get_config
 from src.scrape import scrape
 
+'''
+sys.argv = [
+    __file__,
+    'job2.json'
+]
+'''
+
 if __name__ == '__main__':
     config_file = CONFIG_FILE if len(sys.argv) == 1 else sys.argv[1]
 
