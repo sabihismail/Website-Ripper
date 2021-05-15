@@ -502,7 +502,7 @@ def download_file(url: str, ideal_filename: str = None, out_dir: str = None, hea
     actual_name = None
     content_disposition = res_headers.get('Content-Disposition', failobj=None)
     if content_disposition:
-        result = re.findall('filename=(.+)', content_disposition)
+        result = re.findall('filename="(.+)"', content_disposition)
         result = first_or_none(result)
 
         if get_file_extension(result):

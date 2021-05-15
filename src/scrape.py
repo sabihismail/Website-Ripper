@@ -16,7 +16,8 @@ from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
 from src.util.generic import name_of, distinct, any_list_in_str, first_or_none, replace_with_index, LogType
-from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir, append_to_file
+from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir, append_to_file, \
+    replace_invalid_path_characters
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
 from src.util.web.generic import log, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
@@ -148,10 +149,10 @@ def get_non_cached_sites(urls: List[str], base_url: str, check_cache: bool = Tru
 
 
 def process_queue(queue: OrderedSetQueue, driver: WebDriver, config: Config, base_url: str, send_queue: bool = True):
+    out_dir = config.out_dir.replace('\\', '/')
     while not queue.empty():
         url = queue.dequeue()
 
-        out_dir = join_path(config.out_dir, url[len(base_url):])
         scrape_page(driver, config, url, base_url, out_dir, queue if send_queue else None)
 
         if config.min_timeout or config.max_timeout:
@@ -182,6 +183,7 @@ def scrape_single_page(driver: WebDriver, config: Config):
 def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, queue: Optional[OrderedSetQueue],
                 completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None):
     page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
+    page_out_dir = replace_invalid_path_characters(page_out_dir)
     index_path = join_path(page_out_dir, filename='index.html')
 
     driver_go_and_wait(driver, url, config.scroll_pause_time)
@@ -208,11 +210,11 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             if not iframe_handler:
                 outer_html = iframe.get_attribute('outerHTML')
                 identifier = iframe.get_attribute('id')
-                log(f'IFRAME_ERROR: No handler for: {outer_html}')
 
                 if identifier and identifier not in NOT_HANDLED_IFRAMES:
                     NOT_HANDLED_IFRAMES.append(identifier)
                     append_to_file('cache/failed_iframes.txt', outer_html)
+                    log(f'IFRAME_ERROR: No handler for: {outer_html}')
 
                 continue
 

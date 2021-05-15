@@ -69,16 +69,16 @@ def get_file_extension(s: str, fatal=False, include_ext_period: bool = False) ->
     return split_filename(s, fatal=fatal, include_ext_period=include_ext_period)[1]
 
 
-def replace_invalid_path_characters(path: str):
+def replace_invalid_path_characters(path: str, replacement: str = '') -> str:
     for char in INVALID_PATH_CHARACTERS:
-        path = path.replace(char, '')
+        path = path.replace(char, replacement)
 
     return path
 
 
-def replace_invalid_filename_characters(filename: str):
+def replace_invalid_filename_characters(filename: str, replacement: str = '') -> str:
     for char in INVALID_FILENAME_CHARACTERS:
-        filename = filename.replace(char, '')
+        filename = filename.replace(char, replacement)
 
     return filename
 
