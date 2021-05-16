@@ -270,6 +270,9 @@ def join_url(url: str, *paths: str):
 
 
 def url_is_relative(url) -> bool:
+    if is_blank(url):
+        return False
+
     return bool(RELATIVE_URL_REGEX.search(url))
 
 

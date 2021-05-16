@@ -1,10 +1,11 @@
 import inspect
-from typing import List, get_origin, get_args
+from typing import List, get_origin, get_args, Any
 
 from src.util.generic import log, first_or_none, LogType
 
 SAFE_PARAMETER_MAPPING = {
-    'identifier': 'id'
+    'identifier': 'id',
+    'obj_type': 'type'
 }
 
 PRIMITIVE_TYPES = [
@@ -73,7 +74,10 @@ def json_parse_class(json: dict, class_type: type):
     return obj
 
 
-def json_parse_class_list(json_array, class_type):
+def json_parse_class_list(json_array, class_type, key: str = '', default: Any = None, fatal: bool = False):
+    if key:
+        json_array = json_parse(json_array, key, default=default, fatal=fatal)
+
     lst: List[class_type] = []
 
     for obj in json_array:

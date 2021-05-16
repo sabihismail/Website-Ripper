@@ -7,11 +7,12 @@ from urllib.parse import urlparse, ParseResult
 
 import filetype
 from selenium import webdriver
+from selenium.common.exceptions import NoSuchWindowException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 
-from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements
+from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements, IFrameIgnore
 from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
@@ -180,6 +181,14 @@ def scrape_single_page(driver: WebDriver, config: Config):
     process_queue(queue, driver, config, '', send_queue=False)
 
 
+def is_ignored_iframe(iframe_ignore_lst: List[IFrameIgnore], identifier: str = '') -> bool:
+    for iframe_ignore in iframe_ignore_lst:
+        if iframe_ignore.obj_type and identifier and identifier in iframe_ignore.identifier:
+            return False
+
+    return True
+
+
 def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, queue: Optional[OrderedSetQueue],
                 completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None):
     page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
@@ -211,7 +220,9 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
                 outer_html = iframe.get_attribute('outerHTML')
                 identifier = iframe.get_attribute('id')
 
-                if identifier and identifier not in NOT_HANDLED_IFRAMES:
+                ignored_iframe = is_ignored_iframe(config.iframe_ignore, identifier=identifier)
+
+                if identifier and not ignored_iframe and identifier not in NOT_HANDLED_IFRAMES:
                     NOT_HANDLED_IFRAMES.append(identifier)
                     append_to_file('cache/failed_iframes.txt', outer_html)
                     log(f'IFRAME_ERROR: No handler for: {outer_html}')
@@ -219,10 +230,12 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
                 continue
 
             driver.switch_to.frame(iframe)
+            wait_page_load(driver)
 
             iframe_jobs = iframe_handler.handle(driver)
 
             driver.switch_to.default_content()
+            wait_page_load(driver)
 
             for iframe_job in iframe_jobs:
                 iframe_job.identifier = iframe.get_attribute('id')
@@ -248,6 +261,11 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
     a_elements = driver.find_elements_by_tag_name('a')
     for a_element in a_elements:
         href = a_element.get_attribute('href')
+
+        if not href:
+            html = a_element.get_attribute('outerHTML')
+            log(f'A_ELEMENT: Could not handle: {html})')
+            continue
 
         if url_is_relative(href):
             href = join_url(base_url, href)
@@ -291,7 +309,23 @@ def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, titl
     for i in range(len(urls)):
         file_url, original_url = urls[i]
 
-        if get_content_type(file_url, headers=default_origin_headers(driver.current_url)) == 'text/html':
+        headers = None
+        retry = 0
+        MAX_RETRIES = 5
+        while not headers and retry < MAX_RETRIES:
+            try:
+                headers = default_origin_headers(driver.current_url)
+
+                retry = MAX_RETRIES
+            except NoSuchWindowException:
+                retry += 1
+                driver.navigate().refresh()
+                wait_page_load(driver)
+
+                if retry == MAX_RETRIES:
+                    pass
+
+        if get_content_type(file_url, headers=headers) == 'text/html':
             continue
 
         ideal_filename = None
