@@ -10,6 +10,7 @@ from pathlib import Path
 from queue import LifoQueue
 from typing import List, Tuple, Optional, Union, Any
 from typing.io import IO
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, ParseResult
 
 import validators
@@ -26,6 +27,12 @@ URL_REGEX = re.compile(r'[=:] *(?:\'([^\']*)\'|"([^"]*)")| *\(([^()]*)\)')
 RELATIVE_URL_REGEX = re.compile(r'^(?!www\.|(?:http|ftp)s?://|[A-Za-z]:\\|//).*')
 
 CACHE_WEBSITE_LINKS_FILE = 'cache/website_links.db'
+
+DEFAULT_HEADERS = [
+    ('Accept', '*/*'),
+    ('Accept-Encoding', 'identity'),
+    ('User-Agent', 'website-ripper/1.0')
+]
 
 
 class GroupByPair:
@@ -301,8 +308,18 @@ def get_origin(s: str) -> str:
     return s[:find_nth(s, '/', 3)]
 
 
-def configure_urllib_opener(headers: List[Tuple[str, str]]):
-    opener = urllib.request.build_opener()
+def configure_urllib_opener(headers: List[Tuple[str, str]], use_default_headers: bool = True):
+    http_handler = urllib.request.HTTPHandler()
+    http_handler.set_http_debuglevel(1)
+
+    https_handler = urllib.request.HTTPSHandler()
+    https_handler.set_http_debuglevel(1)
+
+    opener = urllib.request.build_opener()  # http_handler, https_handler)
+
+    if use_default_headers:
+        for default_header in DEFAULT_HEADERS:
+            opener.addheaders.append(default_header)
 
     if headers:
         opener.addheaders = headers
@@ -359,12 +376,7 @@ def get_filename_from_url(url: str) -> str:
     return os.path.basename(urlparse(url).path)
 
 
-def get_content_type_from_headers(res_headers):
-    if not res_headers:
-        return None
-
-    content_type: str = res_headers.get('Content-Type', failobj=None)
-
+def get_content_type_from_header(content_type: str):
     if not content_type:
         return None
 
@@ -374,16 +386,32 @@ def get_content_type_from_headers(res_headers):
     return content_type
 
 
+def get_content_type_from_headers(res_headers: HTTPMessage):
+    if not res_headers:
+        return None
+
+    content_type: str = res_headers.get('Content-Type', failobj=None)
+
+    return get_content_type_from_header(content_type)
+
+
 def get_content_type_head(url: str):
     try:
         req = urllib.request.Request(url, method='HEAD')
-        response = urllib.request.urlopen(req)
-    except:
-        return None
+        with urllib.request.urlopen(req) as response:
+            res_headers: HTTPMessage = response.info()
 
-    res_headers: HTTPMessage = response.info()
-
-    content_type = get_content_type_from_headers(res_headers)
+            content_type = get_content_type_from_headers(res_headers)
+    except HTTPError as e:
+        if e and e.headers:
+            content_type_tmp = e.headers.get('Content-Type', None)
+            content_type = get_content_type_from_header(content_type_tmp)
+        else:
+            log(e, extra=f'URL: {url}', fatal=False, log_type=LogType.ERROR)
+            content_type = None
+    except Exception as e:
+        log(e, extra=f'General Exception URL: {url}', fatal=False, log_type=LogType.ERROR)
+        content_type = None
 
     return content_type
 
@@ -421,13 +449,13 @@ def get_content_type_cache(url: str):
 
 
 def get_content_type(url: str, headers: List[Tuple[str, str]] = None, with_progress_bar: bool = True, cache: bool = True) -> Optional[str]:
-    configure_urllib_opener(headers)
-
     if cache:
         check_cached = get_content_type_cache(url)
 
         if check_cached:
             return check_cached
+
+    configure_urllib_opener(headers)
 
     check_head = get_content_type_head(url)
 

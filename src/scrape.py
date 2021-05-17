@@ -17,7 +17,7 @@ from src.iframe.iframe import IFrameHandler
 from src.iframe.vimeo import VimeoIFrameHandler
 from src.scrape_classes import ScrapeJob, ScrapeJobType, ScrapeJobTask
 from src.util.generic import name_of, distinct, any_list_in_str, first_or_none, replace_with_index, LogType
-from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, read_file, move_file_to_dir, append_to_file, \
+from src.util.io import validate_path, write_file, DuplicateHandler, ensure_directory_exists, split_full_path, move_file_to_dir, append_to_file, \
     replace_invalid_path_characters
 from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
@@ -51,6 +51,8 @@ DEFAULT_IFRAME_HANDLERS = [
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
 
 NOT_HANDLED_IFRAMES = []
+
+MAX_RETRIES = 5
 
 
 def get_mapped_cookies(cookies: List[Cookie]):
@@ -270,7 +272,12 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
         if url_is_relative(href):
             href = join_url(base_url, href)
 
-        if href and url_in_domain(base_url, href):
+        content_type = get_content_type(href, headers=get_default_headers(driver.current_url, config.user_agent))
+        if content_type and content_type != 'text/html':
+            download_html_element(downloaded_elements, config, driver, href, href, page_out_dir, None)
+            continue
+
+        if url_in_domain(base_url, href):
             if href not in relative_links:
                 relative_links.append(href)
 
@@ -300,67 +307,75 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             queue.enqueue(src_url)
 
 
-def scrape_html_elements(downloaded_elements, config, driver, page_out_dir, title):
-    js_files = []
+def download_html_element(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, file_url: str, original_url: str, page_out_dir: str,
+                          ideal_filename: Optional[str]):
     content_out_dir = join_path(page_out_dir, f'/{config.data_directory}')
+
+    headers = None
+    retry = 0
+    while not headers and retry < MAX_RETRIES:
+        try:
+            headers = get_default_headers(driver.current_url, config.user_agent)
+
+            retry = MAX_RETRIES
+        except NoSuchWindowException:
+            retry += 1
+            driver.refresh()
+            wait_page_load(driver)
+
+            if retry == MAX_RETRIES:
+                pass
+
+    if get_content_type(file_url, headers=headers) == 'text/html':
+        return
+
+    filename = download_element(driver.current_url, file_url, out_dir=content_out_dir, filename=ideal_filename, user_agent=config.user_agent,
+                                group_by=DEFAULT_GROUP_BY)
+
+    if not filename:
+        return
+
+    '''
+    if filename.endswith('.js'):
+        js_files.append(filename)
+    '''
+
+    scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url)
+    downloaded_elements.append(scrape_job)
+
+
+def scrape_html_elements(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, page_out_dir: str, title: str):
+    # js_files = []
     completed_urls = distinct([element.url for element in downloaded_elements])
     urls = find_urls_in_html_or_js(str(driver.page_source))
     urls = [(url, original_url) for url, original_url in urls if url not in completed_urls]
     for i in range(len(urls)):
         file_url, original_url = urls[i]
 
-        headers = None
-        retry = 0
-        MAX_RETRIES = 5
-        while not headers and retry < MAX_RETRIES:
-            try:
-                headers = default_origin_headers(driver.current_url)
-
-                retry = MAX_RETRIES
-            except NoSuchWindowException:
-                retry += 1
-                driver.navigate().refresh()
-                wait_page_load(driver)
-
-                if retry == MAX_RETRIES:
-                    pass
-
-        if get_content_type(file_url, headers=headers) == 'text/html':
-            continue
-
         ideal_filename = None
         if title:
             ideal_filename = title + (f' - {i + 1}' if len(urls) > 1 else '')
 
-        filename = download_element(driver.current_url, file_url, out_dir=content_out_dir, filename=ideal_filename, user_agent=config.user_agent,
-                                    group_by=DEFAULT_GROUP_BY)
-
-        if not filename:
-            continue
-
-        if filename.endswith('.js'):
-            js_files.append(filename)
-
-        scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url)
-        downloaded_elements.append(scrape_job)
-    '''
+        download_html_element(downloaded_elements, config, driver, file_url, original_url, page_out_dir, ideal_filename)
+        '''
         for js_file in js_files:
             parse_js_urls(js_file, driver.current_url, content_out_dir, downloaded_elements, user_agent=config.user_agent, group_by=DEFAULT_GROUP_BY)
         '''
 
 
-def scrape_image_elements(downloaded_elements, config, driver, page_out_dir, title):
+def scrape_image_elements(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, page_out_dir: str, title: str):
     image_out_dir = join_path(page_out_dir, f'/{config.data_directory}/images')
     elements = scrape_generic_content(driver, config, title, 'img', 'src', image_out_dir)
     downloaded_elements.extend(elements)
 
 
-def scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title):
+def scrape_video_elements(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, page_out_dir: str, title: str):
     video_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
     elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
     downloaded_elements.extend(elements)
 
 
+'''
 def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[ScrapeJob], user_agent: str,
                   group_by: GroupByMapping = None):
     text = read_file(filename)
@@ -371,7 +386,7 @@ def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloa
     for i in range(len(urls)):
         file_url, original_url = urls[i]
 
-        if get_content_type(file_url, headers=default_origin_headers(current_url)) == 'text/html':
+        if get_content_type(file_url, headers=get_default_headers(current_url, config)) == 'text/html':
             continue
 
         filename = download_element(current_url, file_url, out_dir=content_out_dir, user_agent=user_agent, group_by=group_by)
@@ -381,6 +396,7 @@ def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloa
 
         scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=original_url or file_url)
         downloaded_elements.append(scrape_job)
+'''
 
 
 def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
@@ -392,7 +408,16 @@ def get_content_title(driver: WebDriver, content_name: ContentName) -> str:
     return element.text
 
 
-def default_origin_headers(url: str) -> List[Tuple[str, str]]:
+def get_default_headers(current_url: str, user_agent: str) -> List[Tuple[str, str]]:
+    lst = get_default_origin_headers(current_url)
+
+    if user_agent:
+        lst.append(('User-Agent', user_agent))
+
+    return lst
+
+
+def get_default_origin_headers(url: str) -> List[Tuple[str, str]]:
     return [
         ('Referer', get_referer(url)),
         ('Origin', get_origin(url)),
@@ -406,10 +431,7 @@ def download_element(current_url: str, src_url: str, out_dir: str = None, filena
     if out_dir:
         full_path = validate_path(out_dir)
 
-    headers = default_origin_headers(current_url)
-
-    if user_agent:
-        headers.append(('User-Agent', user_agent))
+    headers = get_default_headers(current_url, user_agent)
 
     downloaded_file = download_file(src_url, ideal_filename=filename, out_dir=full_path, headers=headers, duplicate_handler=DuplicateHandler.HASH_COMPARE,
                                     ignored_content_types=IGNORED_CONTENT_TYPES, group_by=group_by)

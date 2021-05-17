@@ -1,12 +1,12 @@
 import json
 from enum import Flag, auto, Enum
 from pathlib import Path
-from typing import List, NamedTuple
+from typing import List
 
 from selenium.webdriver.common.by import By
 
 from src.util.generic import log, LogType
-from src.util.json_util import json_parse, json_parse_enum, json_parse_class, json_parse_class_list
+from src.util.json_util import json_parse, json_parse_enum, json_parse_class_list
 from src.util.selenium_util import UIElement, UITask
 
 CONFIG_FILE = 'job.json'

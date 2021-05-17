@@ -1,6 +1,7 @@
 import mimetypes as mimetype_lib
 
 # Retrieved and modified from https://github.com/samuelneff/MimeTypeMap/blob/master/MimeTypeMap.cs
+# noinspection SpellCheckingInspection
 MIMETYPES = [
     (".323", "text/h323"),
     (".3g2", "video/3gpp2"),

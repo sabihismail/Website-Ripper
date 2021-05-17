@@ -13,8 +13,12 @@ class LogType(Enum):
     ERROR = 'ERROR'
 
 
-def log(s: Union[str, Exception], method: str = None, fatal: bool = True, log_type: LogType = LogType.INFO, end: str = '\n') -> None:
+def log(s: Union[str, Exception], extra: str = None, method: str = None, fatal: bool = True, log_type: LogType = LogType.INFO, end: str = '\n') -> None:
     to_print = str(s)
+
+    if not is_blank(extra):
+        to_print = extra + ' - ' + to_print
+
     if method:
         to_print = s + ' - ' + method
 
