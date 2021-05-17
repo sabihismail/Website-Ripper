@@ -434,8 +434,6 @@ def get_content_type_get(url: str, with_progress_bar: bool = True):
 
 
 def get_content_type_cache(url: str):
-    ensure_directory_exists('/cache')
-
     download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
     cached = download_cache.get(url, default=None)
 
@@ -500,8 +498,6 @@ def read_url_utf8(url: str) -> str:
 def download_file(url: str, ideal_filename: str = None, out_dir: str = None, headers: List[Tuple[str, str]] = None, with_progress_bar: bool = True,
                   cache: bool = True, duplicate_handler: DuplicateHandler = DuplicateHandler.FIND_VALID_FILE, ignored_content_types: List[str] = None,
                   max_filename_length=DEFAULT_MAX_FILENAME_LENGTH, group_by: GroupByMapping = None) -> DownloadedFile:
-    ensure_directory_exists('/cache')
-
     download_cache = shelve.open(CACHE_WEBSITE_LINKS_FILE, writeback=True)
 
     if cache and url in download_cache:

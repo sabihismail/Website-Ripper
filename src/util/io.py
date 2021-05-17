@@ -63,6 +63,9 @@ def split_filename(s: str, fatal=False, include_ext_period: bool = False) -> Tup
 
 
 def get_file_extension(s: str, fatal=False, include_ext_period: bool = False) -> Optional[str]:
+    if not s:
+        return None
+
     if '/' in s:
         _, s = split_full_path(s)
 

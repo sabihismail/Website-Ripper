@@ -49,6 +49,7 @@ DEFAULT_IFRAME_HANDLERS = [
 ]
 
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
+CACHE_QUEUED_URLS_FILE = 'cache/queued_urls.db'
 
 NOT_HANDLED_IFRAMES = []
 
@@ -106,6 +107,8 @@ def scrape(config: Config):
                     element.click()
                     wait_page_redirect(driver, old_url)
 
+    ensure_directory_exists('/cache')
+
     if config.scrape_type == ScrapeType.SINGLE_PAGE:
         scrape_single_page(driver, config)
     elif config.scrape_type == ScrapeType.ALL_PAGES:
@@ -126,9 +129,6 @@ def scrape_sitemap(base_url: str) -> List[str]:
 
 
 def add_completed_url_to_cache(url: str, base_url: str):
-    base_url = get_base_url(base_url)
-
-    ensure_directory_exists('/cache')
     with shelve.open(CACHE_COMPLETED_URLS_FILE, writeback=True) as url_cache:
         lst: List[str] = url_cache.get(base_url, default=[])
 
@@ -138,13 +138,19 @@ def add_completed_url_to_cache(url: str, base_url: str):
         url_cache[base_url] = lst
 
 
+def is_url_completed(url: str, base_url: str):
+    with shelve.open(CACHE_COMPLETED_URLS_FILE, writeback=True) as url_cache:
+        lst: List[str] = url_cache.get(base_url, default=[])
+
+        return url in lst
+
+
 def get_non_cached_sites(urls: List[str], base_url: str, check_cache: bool = True) -> List[str]:
     if not check_cache:
         return urls
 
     base_url = get_base_url(base_url)
 
-    ensure_directory_exists('/cache')
     with shelve.open(CACHE_COMPLETED_URLS_FILE, writeback=True) as url_cache:
         lst: List[str] = url_cache.get(base_url, default=[])
 
@@ -152,9 +158,13 @@ def get_non_cached_sites(urls: List[str], base_url: str, check_cache: bool = Tru
 
 
 def process_queue(queue: OrderedSetQueue, driver: WebDriver, config: Config, base_url: str, send_queue: bool = True):
+    previously_queued_urls = get_queued_urls(base_url)
+    queue.enqueue_list(previously_queued_urls)
+
     out_dir = config.out_dir.replace('\\', '/')
     while not queue.empty():
         url = queue.dequeue()
+        remove_queued_url(url, base_url)
 
         scrape_page(driver, config, url, base_url, out_dir, queue if send_queue else None)
 
@@ -163,22 +173,61 @@ def process_queue(queue: OrderedSetQueue, driver: WebDriver, config: Config, bas
             sleep(timeout)
 
 
+def add_list_to_queue(queue: OrderedSetQueue, urls: List[str], base_url: str):
+    for url in urls:
+        add_to_queue(queue, url, base_url)
+
+
+def add_to_queue(queue: OrderedSetQueue, url: str, base_url: str):
+    if is_url_completed(url, base_url):
+        return
+
+    queue.enqueue(url)
+
+    with shelve.open(CACHE_QUEUED_URLS_FILE, writeback=True) as url_cache:
+        lst: List[str] = url_cache.get(base_url, default=[])
+
+        if url not in lst:
+            lst.append(url)
+
+        url_cache[base_url] = lst
+
+
+def remove_queued_url(url: str, base_url: str):
+    with shelve.open(CACHE_QUEUED_URLS_FILE, writeback=True) as url_cache:
+        lst: List[str] = url_cache.get(base_url, default=[])
+
+        if url in lst:
+            lst.remove(url)
+
+        url_cache[base_url] = lst
+
+
+def get_queued_urls(base_url: str):
+    with shelve.open(CACHE_QUEUED_URLS_FILE, writeback=True) as url_cache:
+        lst: List[str] = url_cache.get(base_url, default=[])
+
+        return lst
+
+
 def scrape_website(driver: WebDriver, config: Config, base_url: str):
     queue = OrderedSetQueue(queue_type=QueueType.FIFO)
-    queue.enqueue(base_url)
+    add_to_queue(queue, base_url, base_url)
 
     if config.scrape_sitemap:
         sitemap = scrape_sitemap(base_url)
         non_cached_sites = get_non_cached_sites(sitemap, base_url, check_cache=config.cache_completed_urls)
 
-        queue.enqueue_list(non_cached_sites)
+        add_list_to_queue(queue, non_cached_sites, base_url)
 
     process_queue(queue, driver, config, base_url)
 
 
 def scrape_single_page(driver: WebDriver, config: Config):
     queue = OrderedSetQueue(queue_type=QueueType.FIFO)
-    queue.enqueue_list(config.urls)
+    for url in config.urls:
+        base_url = get_base_url(url)
+        add_to_queue(queue, url, base_url)
 
     process_queue(queue, driver, config, '', send_queue=False)
 
@@ -304,7 +353,7 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             if url_in_list(src_url, completed_pages):
                 continue
 
-            queue.enqueue(src_url)
+            add_to_queue(queue, src_url, base_url)
 
 
 def download_html_element(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, file_url: str, original_url: str, page_out_dir: str,
