@@ -34,6 +34,10 @@ def log(s: Union[str, Exception], extra: str = None, method: str = None, fatal: 
         exit(-1)
 
 
+def find_all_substrings(s: str, sub_string: str):
+    return [i for i, letter in enumerate(s) if letter == sub_string]
+
+
 def ends_with_skip(txt: str, char: str, skip: List[str] = None) -> bool:
     if not skip:
         return txt.endswith(char)

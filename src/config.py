@@ -24,6 +24,8 @@ CONFIG_VAL_SCRAPE_SITEMAP = 'scrape_sitemap'
 CONFIG_VAL_URLS = 'urls'
 CONFIG_VAL_USER_AGENT = 'user_agent'
 CONFIG_VAL_IFRAME_IGNORE = 'iframe_ignore'
+CONFIG_VAL_POST_SCRAPE_JOBS = 'post_scrape_jobs'
+CONFIG_VAL_POST_SCRAPE_JOBS_ONLY = 'post_scrape_jobs_only'
 
 CONFIG_VAL_CONTENT_NAME = 'content_name'
 CONFIG_VAL_CONTENT_NAME_ID = 'id'
@@ -55,6 +57,20 @@ class IFrameIgnore:
     def __init__(self, identifier: str, obj_type: str):
         self.identifier = identifier
         self.obj_type = obj_type
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+
+class PostScrapeJobType(Enum):
+    REPLACE = 'REPLACE'
+
+
+class PostScrapeJob:
+    def __init__(self, obj_type: PostScrapeJobType, identifier: str, text: str):
+        self.obj_type = obj_type
+        self.identifier = identifier
+        self.text = text
 
     def __repr__(self):
         return str(self.__dict__)
@@ -105,7 +121,8 @@ class Config:
     def __init__(self, scrape_type: ScrapeType, urls: List[str] = None, out_dir: str = None, cookies: List[Cookie] = None, content_name: ContentName = None,
                  user_agent: str = None, login: Login = None, scrape_elements: ScrapeElements = None, scrape_sitemap: bool = True,
                  data_directory: str = 'data', substrings_to_skip: List[str] = None, scroll_pause_time: float = 1.0, min_timeout: float = 5.0,
-                 max_timeout: float = 10.0, cache_completed_urls: bool = True, iframe_ignore: List[IFrameIgnore] = None):
+                 max_timeout: float = 10.0, cache_completed_urls: bool = True, iframe_ignore: List[IFrameIgnore] = None,
+                 post_scrape_jobs: List[PostScrapeJob] = None, post_scrape_jobs_only: bool = False):
         self.scrape_type = scrape_type
         self.urls: List[str] = [] if urls is None else urls
         self.out_dir = out_dir
@@ -122,6 +139,8 @@ class Config:
         self.max_timeout = max_timeout
         self.cache_completed_urls = cache_completed_urls
         self.iframe_ignore: List[IFrameIgnore] = [] if iframe_ignore is None else iframe_ignore
+        self.post_scrape_jobs: List[PostScrapeJob] = [] if post_scrape_jobs is None else post_scrape_jobs
+        self.post_scrape_jobs_only = post_scrape_jobs_only
 
     def __repr__(self):
         return str(self.__dict__)
@@ -187,10 +206,13 @@ def json_to_config(obj) -> Config:
 
     iframe_ignore = json_parse_class_list(obj, IFrameIgnore, key=CONFIG_VAL_IFRAME_IGNORE, default=[])
 
+    post_scrape_jobs_only: bool = json_parse(obj, CONFIG_VAL_POST_SCRAPE_JOBS_ONLY, default=False)
+    post_scrape_jobs: List[PostScrapeJob] = json_parse_class_list(obj, PostScrapeJob, key=CONFIG_VAL_POST_SCRAPE_JOBS, default=[])
+
     config = Config(scrape_type, urls=urls, cookies=cookies, out_dir=out_dir, content_name=content_name, user_agent=user_agent, login=login,
                     scrape_elements=scrape_elements, scrape_sitemap=scrape_sitemap, data_directory=data_directory, substrings_to_skip=substrings_to_skip,
                     scroll_pause_time=scroll_pause_time, min_timeout=min_timeout, max_timeout=max_timeout, cache_completed_urls=cache_completed_urls,
-                    iframe_ignore=iframe_ignore)
+                    iframe_ignore=iframe_ignore, post_scrape_jobs=post_scrape_jobs, post_scrape_jobs_only=post_scrape_jobs_only)
 
     return config
 

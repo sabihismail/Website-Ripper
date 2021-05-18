@@ -1,4 +1,5 @@
 import inspect
+from enum import Enum
 from typing import List, get_origin, get_args, Any
 
 from src.util.generic import log, first_or_none, LogType
@@ -58,16 +59,20 @@ def json_parse_class(json: dict, class_type: type):
             continue
 
         if arg_type in PRIMITIVE_TYPES:
-            d[arg] = json[temp_arg]
+            generated_arg_obj = json[temp_arg]
+        elif issubclass(arg_type, Enum):
+            generated_arg_obj = json_parse_enum(json, temp_arg, arg_type, fatal=True)
         elif get_origin(arg_type) and get_origin(arg_type) == list:
             list_type = first_or_none(get_args(arg_type))
 
             if not list_type:
                 log(f'List Type {arg_type} was None, origin: {get_origin(arg_type)}', log_type=LogType.ERROR)
 
-            d[arg] = json_parse_class_list(json[temp_arg], list_type)
+            generated_arg_obj = json_parse_class_list(json[temp_arg], list_type, fatal=True)
         else:
-            d[arg] = json_parse_class(json[temp_arg], arg_type)
+            generated_arg_obj = json_parse_class(json[temp_arg], arg_type)
+
+        d[arg] = generated_arg_obj
 
     obj = class_type(**d)
 

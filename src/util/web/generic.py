@@ -10,8 +10,8 @@ from pathlib import Path
 from queue import LifoQueue
 from typing import List, Tuple, Optional, Union, Any
 from typing.io import IO
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse, ParseResult
+from urllib.error import HTTPError
+from urllib.parse import urlparse, ParseResult, urldefrag
 
 import validators
 from filetype import filetype
@@ -19,7 +19,7 @@ from tldextract import tldextract
 
 from src.util.generic import find_nth, is_blank, first_or_none, name_of, find_nth_reverse, LogType, log
 from src.util.io import DEFAULT_MAX_FILENAME_LENGTH, join_path, shorten_file_name, move_file, split_path_components, join_filename_with_ext, \
-    get_file_extension, DuplicateHandler, get_filename, split_filename, ensure_directory_exists
+    get_file_extension, DuplicateHandler, get_filename, split_filename
 from src.util.web import mimetypes_extended
 from src.util.web.progress_bar import DownloadProgressBar
 
@@ -246,6 +246,15 @@ def url_in_list_parsed(parsed_url: ParseResult, lst: List[ParseResult]) -> bool:
     return False
 
 
+def get_url_without_fragment(url: str) -> Optional[str]:
+    if not url:
+        return None
+
+    base, _ = urldefrag(url)
+
+    return base
+
+
 def url_in_list(url: str, lst: List[ParseResult], fragments: bool = True) -> bool:
     parsed_url = urlparse(url, allow_fragments=fragments)
     return url_in_list_parsed(parsed_url, lst)
@@ -393,6 +402,17 @@ def get_content_type_from_headers(res_headers: HTTPMessage):
     content_type: str = res_headers.get('Content-Type', failobj=None)
 
     return get_content_type_from_header(content_type)
+
+
+def is_url_valid(url: str, headers: List[Tuple[str, str]] = None) -> True:
+    configure_urllib_opener(headers)
+
+    try:
+        code = urllib.request.urlopen(url)
+
+        return code == 200
+    except:
+        return False
 
 
 def get_content_type_head(url: str):

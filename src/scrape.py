@@ -23,7 +23,7 @@ from src.util.ordered_queue import OrderedSetQueue, QueueType
 from src.util.selenium_util import wait_page_load, get_ui_element, driver_go_and_wait, wait_page_redirect
 from src.util.web.generic import log, download_file, get_referer, get_origin, join_path, is_blank, DownloadedFileResult, GroupByMapping, GroupByPair, \
     get_content_type, url_in_domain, find_urls_in_html_or_js, get_relative_path, url_in_list, url_is_relative, join_url, get_base_url, \
-    get_sub_directory_path
+    get_sub_directory_path, get_url_without_fragment
 from src.util.web.html_parser import find_html_tag
 from src.util.web.sitemap_xml import SitemapXml
 
@@ -52,6 +52,7 @@ CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
 CACHE_QUEUED_URLS_FILE = 'cache/queued_urls.db'
 
 NOT_HANDLED_IFRAMES = []
+ALREADY_LOGGED_DOWNLOADED_URLS = []
 
 MAX_RETRIES = 5
 
@@ -173,22 +174,24 @@ def process_queue(queue: OrderedSetQueue, driver: WebDriver, config: Config, bas
             sleep(timeout)
 
 
-def add_list_to_queue(queue: OrderedSetQueue, urls: List[str], base_url: str):
+def add_list_to_queue(queue: OrderedSetQueue, urls: List[str], base_url: str, config: Config):
     for url in urls:
         add_to_queue(queue, url, base_url)
 
 
 def add_to_queue(queue: OrderedSetQueue, url: str, base_url: str):
-    if is_url_completed(url, base_url):
+    defragmented_url = get_url_without_fragment(url)
+
+    if is_url_completed(defragmented_url, base_url):
         return
 
-    queue.enqueue(url)
+    queue.enqueue(defragmented_url)
 
     with shelve.open(CACHE_QUEUED_URLS_FILE, writeback=True) as url_cache:
         lst: List[str] = url_cache.get(base_url, default=[])
 
-        if url not in lst:
-            lst.append(url)
+        if defragmented_url not in lst:
+            lst.append(defragmented_url)
 
         url_cache[base_url] = lst
 
@@ -218,7 +221,7 @@ def scrape_website(driver: WebDriver, config: Config, base_url: str):
         sitemap = scrape_sitemap(base_url)
         non_cached_sites = get_non_cached_sites(sitemap, base_url, check_cache=config.cache_completed_urls)
 
-        add_list_to_queue(queue, non_cached_sites, base_url)
+        add_list_to_queue(queue, non_cached_sites, base_url, config)
 
     process_queue(queue, driver, config, base_url)
 
@@ -335,7 +338,8 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
 
     for relative_link in relative_links:
         sub_dir = get_sub_directory_path(base_url, relative_link, append_slash=False)
-        filename = join_path(out_dir, sub_dir, filename='index.html')
+        sub_dir_replaced = replace_invalid_path_characters(sub_dir)
+        filename = join_path(out_dir, sub_dir_replaced, filename='index.html')
 
         scrape_job_relative = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=relative_link)
         scrape_job_sub_dir = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=sub_dir)
@@ -473,7 +477,8 @@ def get_default_origin_headers(url: str) -> List[Tuple[str, str]]:
     ]
 
 
-def download_element(current_url: str, src_url: str, out_dir: str = None, filename: str = None, user_agent: str = None, group_by: GroupByMapping = None) \
+def download_element(current_url: str, src_url: str, out_dir: str = None, filename: str = None, user_agent: str = None, group_by: GroupByMapping = None,
+                     log_every_time: bool = False) \
         -> Optional[str]:
     full_path = None
 
@@ -481,16 +486,25 @@ def download_element(current_url: str, src_url: str, out_dir: str = None, filena
         full_path = validate_path(out_dir)
 
     headers = get_default_headers(current_url, user_agent)
-
     downloaded_file = download_file(src_url, ideal_filename=filename, out_dir=full_path, headers=headers, duplicate_handler=DuplicateHandler.HASH_COMPARE,
                                     ignored_content_types=IGNORED_CONTENT_TYPES, group_by=group_by)
 
     if downloaded_file.result == DownloadedFileResult.SKIPPED:
-        log(f'Skipped download {src_url}')
+        if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+            log(f'Skipped download {src_url}')
+
         return None
     elif downloaded_file.result == DownloadedFileResult.FAIL:
-        log(f'Failed on download {src_url}', fatal=False, log_type=LogType.ERROR)
+        if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+            log(f'Failed on download {src_url}', fatal=False, log_type=LogType.ERROR)
+
         return None
+    elif downloaded_file.result == DownloadedFileResult.SUCCESS:
+        if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+            log(f'Successfully downloaded {src_url}', fatal=False, log_type=LogType.INFO)
+
+    if src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+        ALREADY_LOGGED_DOWNLOADED_URLS.append(src_url)
 
     return downloaded_file.filename
 

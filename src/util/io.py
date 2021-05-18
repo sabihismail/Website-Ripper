@@ -2,7 +2,7 @@ import hashlib
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 from charset_normalizer import CharsetNormalizerMatches
 
@@ -149,6 +149,27 @@ def validate_path(directory: str, default_path: str = join_path(os.getcwd(), '/o
     return path
 
 
+def scan_directory(directory: str, ext: List[str]):
+    sub_folders, files = [], []
+
+    with os.scandir(directory) as scan:
+        for f in scan:
+            f: os.DirEntry
+
+            if f.is_dir():
+                sub_folders.append(f.path)
+            if f.is_file():
+                if os.path.splitext(f.name)[1].lower() in ext:
+                    files.append(f.path)
+
+    for directory in list(sub_folders):
+        sf, f = scan_directory(directory, ext)
+        sub_folders.extend(sf)
+        files.extend(f)
+
+    return sub_folders, files
+
+
 def get_sha1_hash_file(path, chunk_size: int = 1024 * 8) -> str:
     sha1 = hashlib.sha1()
 
@@ -251,12 +272,17 @@ def append_to_file(path: str, text: str, filename: str = '', encoding: Optional[
         file.write(text + '\n')
 
 
-def read_file(path: str, filename: str = ''):
+def read_file(path: str, filename: str = '') -> str:
     if filename:
         path = join_path(path, filename=filename)
 
     file_bytes = Path(path).read_bytes()
-    encoding = CharsetNormalizerMatches.from_bytes(file_bytes).best().first().encoding
+    encodings = CharsetNormalizerMatches.from_bytes(file_bytes).best()
+
+    if len(encodings) == 0:
+        encoding = None
+    else:
+        encoding = encodings.first().encoding
 
     return Path(path).read_text(encoding=encoding)
 
