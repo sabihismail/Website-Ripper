@@ -492,18 +492,18 @@ def download_element(current_url: str, src_url: str, out_dir: str = None, filena
     if downloaded_file.result == DownloadedFileResult.SKIPPED:
         if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
             log(f'Skipped download {src_url}')
+            ALREADY_LOGGED_DOWNLOADED_URLS.append(src_url)
 
         return None
     elif downloaded_file.result == DownloadedFileResult.FAIL:
         if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
             log(f'Failed on download {src_url}', fatal=False, log_type=LogType.ERROR)
+            ALREADY_LOGGED_DOWNLOADED_URLS.append(src_url)
 
         return None
-    elif downloaded_file.result == DownloadedFileResult.SUCCESS:
-        if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
-            log(f'Successfully downloaded {src_url}', fatal=False, log_type=LogType.INFO)
 
-    if src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+    if log_every_time or src_url not in ALREADY_LOGGED_DOWNLOADED_URLS:
+        log(f'Successfully downloaded {src_url}', fatal=False, log_type=LogType.INFO)
         ALREADY_LOGGED_DOWNLOADED_URLS.append(src_url)
 
     return downloaded_file.filename
@@ -574,9 +574,11 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
             source = source.find_element_by_tag_name(src_element)
 
         src_url: str = source.get_attribute(link_attribute)
-
         if not src_url:
-            log(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}', fatal=False, log_type=LogType.ERROR)
+            outer_html = source.get_attribute('outerHTML')
+            tag_outer_html = tag_elements[i].get_attribute('outerHTML')
+            log(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}. HTML: {outer_html}, src_element: {src_element}, '
+                f'tag: {tag_outer_html}', fatal=False, log_type=LogType.ERROR)
             continue
 
         log(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.', end='\r')

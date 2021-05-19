@@ -52,7 +52,7 @@ def driver_go_and_wait(driver: WebDriver, url: str, scroll_pause_time: float, fa
     wait_page_load(driver)
 
     if not is_url_exact(driver.current_url, url):
-        driver_go_and_wait(driver, url, fail + 1)
+        driver_go_and_wait(driver, url, scroll_pause_time, fail=fail + 1)
 
     scroll_to_bottom(driver, scroll_pause_time=scroll_pause_time)
 
