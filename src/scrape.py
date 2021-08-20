@@ -11,6 +11,7 @@ from selenium.common.exceptions import NoSuchWindowException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webelement import WebElement
 
 from src.config import Config, ScrapeType, ContentName, Cookie, UITask, ScrapeElements, IFrameIgnore
 from src.iframe.iframe import IFrameHandler
@@ -26,6 +27,8 @@ from src.util.web.generic import log, download_file, get_referer, get_origin, jo
     get_sub_directory_path, get_url_without_fragment
 from src.util.web.html_parser import find_html_tag
 from src.util.web.sitemap_xml import SitemapXml
+from src.video.iframe import VideoHandler
+from src.video.wistia import WistiaVideoHandler
 
 CHROME_DRIVER_LOC = 'res/chromedriver.exe'
 
@@ -44,6 +47,10 @@ DEFAULT_GROUP_BY = GroupByMapping(
     GroupByPair([f'.{matcher.EXTENSION}' for matcher in filetype.archive_matchers], 'archives')
 )
 
+DEFAULT_VIDEO_HANDLERS = [
+    WistiaVideoHandler(),
+]
+
 DEFAULT_IFRAME_HANDLERS = [
     VimeoIFrameHandler(),
 ]
@@ -51,6 +58,7 @@ DEFAULT_IFRAME_HANDLERS = [
 CACHE_COMPLETED_URLS_FILE = 'cache/completed_urls.db'
 CACHE_QUEUED_URLS_FILE = 'cache/queued_urls.db'
 
+NOT_HANDLED_VIDEOS = []
 NOT_HANDLED_IFRAMES = []
 ALREADY_LOGGED_DOWNLOADED_URLS = []
 
@@ -244,7 +252,7 @@ def is_ignored_iframe(iframe_ignore_lst: List[IFrameIgnore], identifier: str = '
 
 
 def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_dir: str, queue: Optional[OrderedSetQueue],
-                completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None):
+                completed_pages: List[ParseResult] = None, iframe_handlers: List[IFrameHandler] = None, video_handlers: List[VideoHandler] = None):
     page_out_dir = get_sub_directory_path(base_url, url, prepend_dir=out_dir, append_slash=True)
     page_out_dir = replace_invalid_path_characters(page_out_dir)
     index_path = join_path(page_out_dir, filename='index.html')
@@ -254,7 +262,7 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
     title = get_content_title(driver, content_name=config.content_name)
     downloaded_elements: List[ScrapeJob] = []
     if config.scrape_elements & ScrapeElements.VIDEOS:
-        scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title)
+        scrape_video_elements(downloaded_elements, config, driver, page_out_dir, title, video_handlers)
 
     if config.scrape_elements & ScrapeElements.IMAGES:
         scrape_image_elements(downloaded_elements, config, driver, page_out_dir, title)
@@ -291,19 +299,7 @@ def scrape_page(driver: WebDriver, config: Config, url: str, base_url: str, out_
             driver.switch_to.default_content()
             wait_page_load(driver)
 
-            for iframe_job in iframe_jobs:
-                iframe_job.identifier = iframe.get_attribute('id')
-
-                if iframe_job.scrape_job_type == ScrapeJobType.VIDEO:
-                    videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
-                    iframe_job.file_path = move_file_to_dir(iframe_job.file_path, videos_out_dir, duplicate_handler=DuplicateHandler.HASH_COMPARE)
-                    iframe_job.html = '''
-                        <video controls style="width: 100%; height: 100%;">
-                            <source src="{0}" type="video/mp4">
-                        </video> 
-                    '''
-
-                downloaded_elements.append(iframe_job)
+            handle_scrape_jobs(downloaded_elements, iframe_jobs, iframe, page_out_dir, config)
 
     if not completed_pages:
         completed_pages = []
@@ -422,11 +418,49 @@ def scrape_image_elements(downloaded_elements: List[ScrapeJob], config: Config, 
     downloaded_elements.extend(elements)
 
 
-def scrape_video_elements(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, page_out_dir: str, title: str):
+def scrape_video_elements(downloaded_elements: List[ScrapeJob], config: Config, driver: WebDriver, page_out_dir: str, title: str,
+                          video_handlers: List[VideoHandler] = None):
     video_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
-    elements = scrape_generic_content(driver, config, title, 'video', 'src', video_out_dir, src_element='source')
-    downloaded_elements.extend(elements)
 
+    tag_elements = driver.find_elements_by_tag_name('video')
+    for i in range(len(tag_elements)):
+        video = tag_elements[i]
+        source = video.find_element_by_tag_name('source')
+
+        # Direct link
+        if source:
+            ideal_filename = None
+            if title:
+                ideal_filename = title + (f' - {i + 1}' if len(tag_elements) > 1 else '')
+
+            scrape_generic_element(driver, config, downloaded_elements, ideal_filename, 'video', 'src', video_out_dir, video, src_element='source')
+        else:
+            if not video_handlers:
+                video_handlers = DEFAULT_VIDEO_HANDLERS
+
+            video_handler: VideoHandler = first_or_none(video_handlers, lambda x: x.can_handle(video))
+
+            if not video_handler:
+                continue
+
+            video_jobs = video_handler.handle(driver, config)
+            handle_scrape_jobs(downloaded_elements, video_jobs, video, page_out_dir, config)
+
+
+def handle_scrape_jobs(downloaded_elements: List[ScrapeJob], jobs: List[ScrapeJob], element: WebElement, page_out_dir: str, config: Config):
+    for job in jobs:
+        job.identifier = element.get_attribute('id')
+
+        if job.scrape_job_type == ScrapeJobType.VIDEO:
+            videos_out_dir = join_path(page_out_dir, f'/{config.data_directory}/videos')
+            job.file_path = move_file_to_dir(job.file_path, videos_out_dir, duplicate_handler=DuplicateHandler.HASH_COMPARE)
+            job.html = '''
+                <video controls style="width: 100%; height: 100%;">
+                    <source src="{0}" type="video/mp4">
+                </video> 
+            '''
+
+        downloaded_elements.append(job)
 
 '''
 def parse_js_urls(filename: str, current_url: str, content_out_dir: str, downloaded_elements: List[ScrapeJob], user_agent: str,
@@ -569,27 +603,32 @@ def scrape_generic_content(driver: WebDriver, config: Config, title: str, tag: s
 
     tag_elements = driver.find_elements_by_tag_name(tag)
     for i in range(len(tag_elements)):
-        source = tag_elements[i]
-        if src_element:
-            source = source.find_element_by_tag_name(src_element)
-
-        src_url: str = source.get_attribute(link_attribute)
-        if not src_url:
-            outer_html = source.get_attribute('outerHTML')
-            tag_outer_html = tag_elements[i].get_attribute('outerHTML')
-            log(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag} {i + 1}. HTML: {outer_html}, src_element: {src_element}, '
-                f'tag: {tag_outer_html}', fatal=False, log_type=LogType.ERROR)
-            continue
-
-        log(f'Starting {link_attribute} download {i + 1}/{len(tag_elements)}.', end='\r')
-
         ideal_filename = None
         if title:
             ideal_filename = title + (f' - {i + 1}' if len(tag_elements) > 1 else '')
 
-        filename = download_element(driver.current_url, src_url, out_dir=out_dir, filename=ideal_filename, user_agent=config.user_agent, group_by=group_by)
-
-        scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=src_url)
-        downloaded_elements.append(scrape_job)
+        scrape_generic_element(driver, config, downloaded_elements, ideal_filename, tag, link_attribute, out_dir, tag_elements[i], src_element, group_by)
 
     return downloaded_elements
+
+
+def scrape_generic_element(driver: WebDriver, config: Config, downloaded_elements: List[ScrapeJob], ideal_filename: str, tag: str, link_attribute: str,
+                           out_dir: str, original: WebElement, src_element: str = None, group_by: GroupByMapping = None):
+    source = original
+    if src_element:
+        source = original.find_element_by_tag_name(src_element)
+
+    src_url: str = source.get_attribute(link_attribute)
+    if not src_url:
+        outer_html = source.get_attribute('outerHTML')
+        tag_outer_html = original.get_attribute('outerHTML')
+        log(f'Could not find {name_of(src_url)}, skipping generic scrape on {tag}. HTML: {outer_html}, src_element: {src_element}, tag: {tag_outer_html}',
+            fatal=False, log_type=LogType.ERROR)
+        return
+
+    log(f'Starting {link_attribute} download {src_url}.', end='\r')
+
+    filename = download_element(driver.current_url, src_url, out_dir=out_dir, filename=ideal_filename, user_agent=config.user_agent, group_by=group_by)
+
+    scrape_job = ScrapeJob(ScrapeJobTask.REPLACE, ScrapeJobType.URL, file_path=filename, url=src_url)
+    downloaded_elements.append(scrape_job)

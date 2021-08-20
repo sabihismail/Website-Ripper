@@ -352,13 +352,29 @@ def ignorable_content_type(ignored_content_types: List[str], content_type: str, 
     return check in ignored_content_types
 
 
-def download_to_json(url: str) -> dict:
+# noinspection DuplicatedCode
+def download_to_json(url: str, headers: List[Tuple[str, str]] = None) -> dict:
+    if headers:
+        configure_urllib_opener(headers)
+
     response = urllib.request.urlopen(url)
     charset = response.info().get_param('charset') or 'utf-8'
     data = response.read().decode(charset)
     json_obj = json.loads(data)
 
     return json_obj
+
+
+# noinspection DuplicatedCode
+def download_to_str(url: str, headers: List[Tuple[str, str]] = None) -> str:
+    if headers:
+        configure_urllib_opener(headers)
+
+    response = urllib.request.urlopen(url)
+    charset = response.info().get_param('charset') or 'utf-8'
+    data = response.read().decode(charset)
+
+    return data
 
 
 def add_to_download_cache(download_cache, *urls, headers: HTTPMessage = None, filename: str = None, result=DownloadedFileResult.SUCCESS) \
