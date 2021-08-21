@@ -7,7 +7,7 @@ from urllib.parse import urlparse, ParseResult
 
 import filetype
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchWindowException
+from selenium.common.exceptions import NoSuchWindowException, NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -425,16 +425,17 @@ def scrape_video_elements(downloaded_elements: List[ScrapeJob], config: Config, 
     tag_elements = driver.find_elements_by_tag_name('video')
     for i in range(len(tag_elements)):
         video = tag_elements[i]
-        source = video.find_element_by_tag_name('source')
 
         # Direct link
-        if source:
+        try:
+            video.find_element_by_tag_name('source')  # Throws NoSuchElementException if not found
+
             ideal_filename = None
             if title:
                 ideal_filename = title + (f' - {i + 1}' if len(tag_elements) > 1 else '')
 
             scrape_generic_element(driver, config, downloaded_elements, ideal_filename, 'video', 'src', video_out_dir, video, src_element='source')
-        else:
+        except NoSuchElementException:
             if not video_handlers:
                 video_handlers = DEFAULT_VIDEO_HANDLERS
 

@@ -12,7 +12,7 @@
       "path": ""
     }
   ],
-  "data_directory": "data",
+  "data_directory": "! data",
   "iframe_ignore": [
     {
       "type": "",

@@ -1,17 +1,19 @@
 import json
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
 from src.config import Config
-from src.scrape import get_default_headers
 from src.scrape_classes import ScrapeJob, ScrapeJobTask, ScrapeJobType
 from src.util.generic import first_or_none
 from src.util.io import DuplicateHandler
 from src.util.json_util import json_parse, json_parse_class_list
 from src.util.web.generic import extract_json_from_text, download_to_str, download_file, get_filename_from_url, DownloadedFileResult
 from src.video.iframe import VideoHandler
+
+if TYPE_CHECKING:
+    from src.scrape import get_default_headers
 
 
 class WistiaVideoMediaAsset:
